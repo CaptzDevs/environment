@@ -1,5 +1,5 @@
 import p5 from "p5";
-import { findClosestTarget } from "./movement";
+import { findClosestTarget, moveToTarget } from "./movement";
 
 function logJson(obj, indent = 2) {
   return JSON.stringify(obj, null, indent);
@@ -28,7 +28,6 @@ const Agent = {
   hunger: 50,
   gender: "male",
   visibility: 100, // pixels → ระยะมองเห็น
-
   color: [Math.random() * 255, Math.random() * 255, Math.random() * 255], // RGB random
   step(world) {
     console.log("dasodsakod");
@@ -215,73 +214,8 @@ function randomWarmNeon() {
   return [r, g, b];
 }
 
-function rotateTowards(agent, targetX, targetY) {
-  const dx = targetX - agent.x;
-  const dy = targetY - agent.y;
-  const desiredAngle = Math.atan2(dy, dx);
-
-  let diff = desiredAngle - agent.facing;
-
-  // ทำให้หมุนทางสั้นที่สุด (normalize -π ถึง π)
-  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-
-  // จำกัดความเร็วหมุน
-  const maxTurn = agent.rotationSpeed;
-  if (Math.abs(diff) <= maxTurn) {
-    agent.facing = desiredAngle;
-  } else {
-    agent.facing += Math.sign(diff) * maxTurn;
-  }
-}
-
-function moveForward(agent) {
-  agent.x += Math.cos(agent.facing) * agent.speed;
-  agent.y += Math.sin(agent.facing) * agent.speed;
-}
-
-export function moveToTarget(agent, targetX, targetY, speed) {
-  if (targetX === null || targetY === null) return;
-
-  // 1) คำนวณ angle ที่ควรหันไปหา target
-  const dx = targetX - agent.x;
-  const dy = targetY - agent.y;
-  const desiredAngle = Math.atan2(dy, dx);
-
-  // 2) หมุนเอาเฉพาะ angle (ไม่เดิน)
-  let diff = desiredAngle - agent.facing;
-  diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // normalize
-
-  const maxTurn = agent.rotationSpeed;
-  if (Math.abs(diff) < maxTurn) {
-    agent.facing = desiredAngle;
-  } else {
-    agent.facing += Math.sign(diff) * maxTurn;
-  }
-
-  // 3) ถ้ายังหันไม่ตรงพอ → ไม่เดิน
-  if (Math.abs(diff) > 0.2) return;
-
-  // 4) เดินแบบ linear แต่เดินไปตาม speed ที่กำหนด
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const moveDist = Math.min(dist, speed);
-
-  agent.x += (dx / dist) * moveDist;
-  agent.y += (dy / dist) * moveDist;
-
-  // 5) ขอบจอ
-  let hitBoundary = false;
-  if (agent.x < 0) { agent.x = 0; hitBoundary = true; }
-  if (agent.x > WORLD_WIDTH) { agent.x = WORLD_WIDTH; hitBoundary = true; }
-  if (agent.y < 0) { agent.y = 0; hitBoundary = true; }
-  if (agent.y > WORLD_HEIGHT) { agent.y = WORLD_HEIGHT; hitBoundary = true; }
-
-  // 6) เคลียร์ target เมื่อถึงจุดหรือชนขอบ
-  if (dist < 1 || hitBoundary) {
-    agent.targetX = null;
-    agent.targetY = null;
-  }
-}
-
+// Biology
+// Economy
 
 // ================= Factory Functions =================
 function createCitizen(name) {
@@ -290,21 +224,19 @@ function createCitizen(name) {
   return {
     ...Agent,
     //================ Biology ================
-    size: 10,
+    size: 8,
     age: 0,
     energy: 100,
-    speed: 10, // pixels per tick
+    speed: 5, // pixels per tick
     reproductionCooldown: 0,
     reproductionChance: 0.001,
 
     gender: GENDERS[Math.floor(Math.random() * GENDERS.length)],
-    visibility: 105, // pixels
+    visibility: 5, // pixels
     hunger: 50,
     color: gender === "male" ? randomCoolNeon() : randomWarmNeon(),
     isAlive: true,
     attractiveness: Math.floor(Math.random() * 100),
-    targetFacing: null,
-
     //================ Economy ================
     type: "citizen",
     name,
@@ -316,73 +248,50 @@ function createCitizen(name) {
     trailLength: 100,
     targetX: null,
     targetY: null,
-    wanderChance: 0.4,
+    wanderChance: .4,
     avoidRadius: 10,
     avoidStrength: 10,
-
-    facing: Math.random() * Math.PI * 2, // หันสุ่มรอบตัว
-    rotationSpeed: 0.1, // 0.1 rad/tick = ประมาณ 6°/tick
 
     step(world) {
       if (!this.isAlive) return;
 
-      // ---------- Hunger ----------
+      // ---------- ลด hunger ----------
       if (TICK % 10 === 0) this.hunger = Math.max(0, this.hunger - 1);
       if (this.hunger <= 0) {
         this.isAlive = false;
         return;
       }
-
-      // ---------- Aging ----------
-      if (TICK % WORLD_TICKS_PER_DAY === 0) this.age++;
-
-      // ---------- Try find business ----------
+      this.age += TICK % WORLD_TICKS_PER_DAY === 0 ? 1 : 0;
+      // ---------- หา closest business ----------
       const closestBusiness = findClosestTarget(
         this,
         world.agents,
         (other) => other.type === "business"
       );
 
-      const shouldWander = Math.random() < this.wanderChance;
+      const shouldWalk = Math.random() < this.wanderChance;
 
-      // ---------- Decide Target ----------
-      if (closestBusiness && this.hunger < 80) {
-        this.targetX = closestBusiness.x;
-        this.targetY = closestBusiness.y;
-      } else if (
-        (this.targetX == null || this.targetY == null) &&
-        shouldWander
-      ) {
-        const range = this.visibility;
-        const randX = this.x + (Math.random() * 2 - 1) * this.speed * range;
-        const randY = this.y + (Math.random() * 2 - 1) * this.speed * range;
+      // ---------- กำหนด target ----------
+      if (closestBusiness && this.hunger < 10) {
+        this.targetX = closestBusiness.x ?? this.x;
+        this.targetY = closestBusiness.y ?? this.y;
+      } else if ((this.targetX == null || this.targetY == null) && shouldWalk) {
+        const randomRange = this.visibility ?? 20;
+        const randomTargetX =
+          (this.x ?? 0) + (Math.random() * 2 - 1) * this.speed * randomRange;
+        const randomTargetY =
+          (this.y ?? 0) + (Math.random() * 2 - 1) * this.speed * randomRange;
 
-        this.targetX = lerp(this.x, randX, 0.3);
-        this.targetY = lerp(this.y, randY, 0.3);
+        this.targetX = lerp(this.x ?? 0, randomTargetX, 0.3);
+        this.targetY = lerp(this.y ?? 0, randomTargetY, 0.3);
       }
 
-      // ---------- Move (Rotation Based) ----------
-    if (this.targetX != null && this.targetY != null) {
-  rotateTowards(this, this.targetX, this.targetY);
+      // ---------- Move ----------
+      moveToTarget(this, this.targetX, this.targetY, this.speed);
 
-  const dx = this.targetX - this.x;
-  const dy = this.targetY - this.y;
-  const desiredAngle = Math.atan2(dy, dx);
-
-  let diff = desiredAngle - this.facing;
-  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-
-  if (Math.abs(diff) < 0.3) {
-    moveForward(this);
-  }
-
-  if (Math.hypot(dx, dy) < 2) {
-    this.targetX = null;
-    this.targetY = null;
-  }
-}
-
-      // ---------- Avoid Other Citizens ----------
+      // ---------- Avoid other citizens ----------
+      const avoidRadius = this.avoidRadius ;
+      const avoidStrength = this.avoidStrength;
       let ax = 0;
       let ay = 0;
       for (const other of world.agents) {
@@ -393,9 +302,8 @@ function createCitizen(name) {
         const dy = this.y - other.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        if (dist < this.avoidRadius && dist > 0) {
-          const factor =
-            ((this.avoidRadius - dist) / this.avoidRadius) * this.avoidStrength;
+        if (dist < avoidRadius && dist > 0) {
+          const factor = ((avoidRadius - dist) / avoidRadius) * avoidStrength;
           ax += (dx / dist) * factor;
           ay += (dy / dist) * factor;
         }
@@ -403,40 +311,40 @@ function createCitizen(name) {
       this.x += ax;
       this.y += ay;
 
-      // ---------- Keep inside canvas (margin 10) ----------
-      this.x = Math.max(10, Math.min(this.x, WORLD_WIDTH - 10));
-      this.y = Math.max(10, Math.min(this.y, WORLD_HEIGHT - 10));
+      // ---------- Keep inside canvas ----------
+      this.x = Math.max(0, Math.min(this.x, WORLD_WIDTH));
+      this.y = Math.max(0, Math.min(this.y, WORLD_HEIGHT));
 
       // ---------- Trail ----------
-      this.trail.push({ x: this.x, y: this.y });
+      this.trail.push({ x: this.x ?? 0, y: this.y ?? 0 });
       if (this.trail.length > this.trailLength) this.trail.shift();
 
-      // ---------- Business Interaction ----------
+      // ---------- Business interaction ----------
       for (const ag of world.agents) {
-        if (ag.type !== "business") continue;
+        if (ag.type === "business") {
+          const dx = (ag.x ?? 0) - (this.x ?? 0);
+          const dy = (ag.y ?? 0) - (this.y ?? 0);
+          const dist = Math.sqrt(dx * dx + dy * dy);
 
-        const dx = ag.x - this.x;
-        const dy = ag.y - this.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist <= 5) {
+            if (!this.hasEnteredBusiness) {
+              this.hasEnteredBusiness = true;
+              this.lastBusiness = ag.name;
 
-        if (dist < 6) {
-          if (!this.hasEnteredBusiness) {
-            this.hasEnteredBusiness = true;
-            this.lastBusiness = ag.name;
+              this.hunger += 10;
+              this.size += 0.5;
+              this.visibility += 1 ;
+              this.money += ag.price ?? 0;
 
-            this.hunger += 10;
-            this.size += 0.4;
-            this.visibility += 1;
-            this.money += ag.price;
-
-            console.log(`${this.name} entered business ${ag.name}`);
+              console.log(`${this.name} entered business ${ag.name}`);
+            }
+          } else {
+            this.hasEnteredBusiness = false;
           }
-        } else {
-          this.hasEnteredBusiness = false;
         }
       }
 
-      // ---------- Passive Citizen Logic ----------
+      // ---------- Citizen logic ----------
       this.money += 1;
       this.hunger += Math.random() > 0.5 ? 1 : -1;
     },
@@ -539,10 +447,7 @@ const sketch = (p) => {
     p.background(240);
 
     World.tickWorld();
-    maintainBusinesses(
-      World,
-      500 / Math.max(TICK / Math.max(WORLD_TICKS_PER_DAY, 1), 1)
-    );
+    maintainBusinesses(World, 500 / Math.max((TICK / Math.max(WORLD_TICKS_PER_DAY,1)),1));
 
     let hoveredAgent = null;
 
@@ -573,17 +478,6 @@ const sketch = (p) => {
 
         p.noStroke();
         p.circle(a.x, a.y, a.size);
-
-        // ---------- วาด facing indicator ----------
-p.stroke(255, 255, 255, 200);
-p.strokeWeight(2);
-
-const fx = a.x + Math.cos(a.facing) * (a.size + 10); // จุดปลาย
-const fy = a.y + Math.sin(a.facing) * (a.size + 10);
-
-p.line(a.x, a.y, fx, fy);
-
-        
       } else if (a.type === "business") {
         // วาด business
         p.fill(200, 100, 50);
@@ -639,9 +533,8 @@ p.line(a.x, a.y, fx, fy);
       `Businesses: ${businesses.length}`,
       `Total Money (Citizens): ${totalMoney.toFixed(0)}`,
       `Gender: ${logJson(citizensGender)}`,
-      `Total Age AVG: ${(
-        citizens.reduce((sum, c) => sum + c.age, 0) / citizens.length
-      ).toFixed(2)}`,
+      `Total Age AVG: ${(citizens.reduce((sum, c) => sum + c.age, 0)/citizens.length).toFixed(2)}`,
+
     ]);
   };
 };
