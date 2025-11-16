@@ -6,8 +6,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>environment</title>
   </head>
+  <style>
+    #stats {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      width: 220px;
+      background: rgba(30, 30, 40, 0.667);
+      color: #fff;
+      font-family: 'Arial', sans-serif;
+      padding: 15px 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      height: fit-content !important;
+    }
+
+    #stats h2 {
+      margin: 0 0 10px 0;
+      font-size: 18px;
+      text-align: center;
+      color: #ffd700;
+      text-shadow: 0 1px 2px #000;
+    }
+
+    #stats p {
+      margin: 6px 0;
+      font-size: 14px;
+      line-height: 1.4;
+      border-bottom: 1px solid rgba(255,255,255,0.2);
+      padding-bottom: 4px;
+    }
+
+    #stats p:last-child {
+      border-bottom: none;
+    }
+  </style>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
+          <script type="module" src="/src/main.js"></script>
+    <div id="stats">Loading</div>
   </body>
 </html>

@@ -58,7 +58,6 @@ export function findClosestTarget(agent, worldAgents, condition) {
   for (const other of worldAgents) {
     if (other === agent) continue;
     if (!condition(other)) continue;
-
     const dx = other.x - agent.x;
     const dy = other.y - agent.y;
     const dist = Math.sqrt(dx*dx + dy*dy);

@@ -1,5 +1,6 @@
 import p5 from "p5";
-import { findClosestTarget, moveToTarget } from "./movement";
+import { findClosestTarget } from "./movement";
+import { randInt } from "./helper/math";
 
 function logJson(obj, indent = 2) {
   return JSON.stringify(obj, null, indent);
@@ -8,9 +9,9 @@ function lerp(start, stop, amt) {
   return start + (stop - start) * amt;
 }
 
-const WORLD_WIDTH = 1000;
-const WORLD_HEIGHT = 600;
-const MAX_CITIZEN = 2;
+const WORLD_WIDTH = window.innerWidth - 20;
+const WORLD_HEIGHT = window.innerHeight - 21;
+const MAX_CITIZEN = 50;
 let TICK = 0;
 const WORLD_TICKS_PER_DAY = 100;
 const TICK_SPEED = 0.5;
@@ -75,19 +76,18 @@ const WorldRules = {
 
       // เกิด citizen ใหม่
       if (Math.random() < 0.01) {
-        const newCitizen = createCitizen(
-          "C" + Math.floor(Math.random() * 1000)
-        );
+        const newCitizen = createCitizen({
+          name: "C" + Math.floor(Math.random() * 1000),
+        });
         agents.push(newCitizen);
         console.log("New Citizen born:", newCitizen.name);
       }
 
       // เกิด business ใหม่
       if (Math.random() < 0.005) {
-        const newBusiness = createBusiness(
-          "B" + Math.floor(Math.random() * 1000),
-          10
-        );
+        const newBusiness = createBusiness({
+          name: "B" + Math.floor(Math.random() * 1000),
+        });
         agents.push(newBusiness);
         console.log("New Business opened:", newBusiness.name);
       }
@@ -130,8 +130,10 @@ const World = {
   agents: [],
 
   // ================= Add agent =================
-  addAgent(agent) {
-    this.agents.push(agent);
+  addAgent(agent, amount = 1) {
+    for (let i = 0; i < amount; i++) {
+      this.agents.push(agent);
+    }
   },
 
   // ================= Get agents =================
@@ -217,151 +219,375 @@ function randomWarmNeon() {
 // Biology
 // Economy
 
+function moveToTarget(agent, targetX, targetY, speed) {
+  if (targetX == null || targetY == null) return;
+
+  const dx = targetX - agent.x;
+  const dy = targetY - agent.y;
+  const desiredAngle = Math.atan2(dy, dx);
+
+  // หมุนหน้าไป target
+  let angleDiff = Math.atan2(
+    Math.sin(desiredAngle - agent.facing),
+    Math.cos(desiredAngle - agent.facing)
+  );
+  if (Math.abs(angleDiff) < agent.rotationSpeed) {
+    agent.facing = desiredAngle;
+  } else {
+    agent.facing += angleDiff > 0 ? agent.rotationSpeed : -agent.rotationSpeed;
+  }
+
+  // move forward ตาม facing (แต่ไม่เกินระยะ target)
+  const distToTarget = Math.hypot(dx, dy);
+  const moveStep = Math.min(speed, distToTarget);
+  agent.x += Math.cos(agent.facing) * moveStep;
+  agent.y += Math.sin(agent.facing) * moveStep;
+
+  // Keep inside canvas
+  let hitBoundary = false;
+  if (agent.x < 0) {
+    agent.x = 0;
+    hitBoundary = true;
+  }
+  if (agent.x > WORLD_WIDTH) {
+    agent.x = WORLD_WIDTH;
+    hitBoundary = true;
+  }
+  if (agent.y < 0) {
+    agent.y = 0;
+    hitBoundary = true;
+  }
+  if (agent.y > WORLD_HEIGHT) {
+    agent.y = WORLD_HEIGHT;
+    hitBoundary = true;
+  }
+
+  // Clear target
+  const reachThreshold = speed;
+  if (distToTarget < reachThreshold || hitBoundary) {
+    agent.targetX = null;
+    agent.targetY = null;
+  }
+}
+
+export function rotateTowardsTarget(agent, targetX, targetY) {
+  if (targetX === null || targetY === null) return;
+
+  const dx = targetX - agent.x;
+  const dy = targetY - agent.y;
+  const desiredAngle = Math.atan2(dy, dx);
+
+  // ---------- หมุน agent ไปทาง desiredAngle แบบจำกัดความเร็ว ----------
+  let angleDiff = desiredAngle - agent.facing;
+  angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff)); // normalize -π → π
+
+  if (Math.abs(angleDiff) < agent.rotationSpeed) {
+    agent.facing = desiredAngle;
+  } else {
+    agent.facing += angleDiff > 0 ? agent.rotationSpeed : -agent.rotationSpeed;
+  }
+}
+
+const avoidAgent = () => {
+  let avoidAngle = 0;
+  let numAvoid = 0;
+  for (const other of world.agents) {
+    if (other === this || !other.isAlive || other.type !== "citizen") continue;
+    const dx = other.x - this.x;
+    const dy = other.y - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < this.avoidRadius && dist > 0) {
+      const angleToOther = Math.atan2(dy, dx);
+      const diff = Math.atan2(
+        Math.sin(angleToOther - this.facing),
+        Math.cos(angleToOther - this.facing)
+      );
+      avoidAngle += (diff > 0 ? -1 : 1) * (this.avoidStrength / (dist + 0.1));
+      numAvoid++;
+    }
+  }
+  if (numAvoid > 0) {
+    avoidAngle /= numAvoid;
+    this.facing += avoidAngle;
+  }
+};
+
+function computeAvoidance(agent, world, mode = "repel") {
+  let angleSum = 0;
+  let count = 0;
+
+  for (const other of world.agents) {
+    if (other === agent || !other.isAlive || other.type !== "citizen") continue;
+
+    const dx = other.x - agent.x;
+    const dy = other.y - agent.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < agent.avoidRadius && dist > 0) {
+      const angleToOther = Math.atan2(dy, dx);
+      const diff = Math.atan2(
+        Math.sin(angleToOther - agent.facing),
+        Math.cos(angleToOther - agent.facing)
+      );
+
+      if (mode === "repel") {
+        angleSum += (diff > 0 ? -1 : 1) * (agent.avoidStrength / (dist + 0.1));
+      } else if (mode === "attract") {
+        angleSum += diff * (agent.avoidStrength / (dist + 0.1));
+      }
+
+      count++;
+    }
+  }
+
+  if (count > 0) {
+    angleSum /= count;
+    agent.facing += angleSum;
+  }
+}
+
+const dropArea = (agent) => {
+  const angle = Math.random() * Math.PI * 2;
+
+  // ระยะ drop แบบ 15–30
+  const dist = randInt(15, 30);
+
+  const dropX = agent.x + Math.cos(angle) * dist;
+  const dropY = agent.y + Math.sin(angle) * dist;
+
+  // ป้องกันไม่ให้ออกนอก world
+  const clampedX = Math.max(0, Math.min(dropX, WORLD_WIDTH));
+  const clampedY = Math.max(0, Math.min(dropY, WORLD_HEIGHT));
+
+  return { x: clampedX, y: clampedY };
+};
+
 // ================= Factory Functions =================
-function createCitizen(name) {
+function createCitizen(props) {
   const gender = GENDERS[Math.floor(Math.random() * GENDERS.length)];
 
   return {
     ...Agent,
-    //================ Biology ================
     size: 8,
     age: 0,
     energy: 100,
-    speed: 5, // pixels per tick
+    speed: 1.5,
     reproductionCooldown: 0,
     reproductionChance: 0.001,
-
-    gender: GENDERS[Math.floor(Math.random() * GENDERS.length)],
-    visibility: 5, // pixels
+    gender,
+    visibility: 300,
     hunger: 50,
     color: gender === "male" ? randomCoolNeon() : randomWarmNeon(),
     isAlive: true,
-    attractiveness: Math.floor(Math.random() * 100),
-    //================ Economy ================
+    attractiveness: randInt(100, true),
+    horny: 0,
+
     type: "citizen",
     name,
     money: 100,
-
-    //================ Movement ================
+    eaten: 0,
 
     trail: [],
     trailLength: 100,
+    x: Math.random() * WORLD_WIDTH, // ±100 รอบกลาง
+    y: Math.random() * WORLD_HEIGHT, // ±100 รอบกลาง
     targetX: null,
     targetY: null,
-    wanderChance: .4,
-    avoidRadius: 10,
-    avoidStrength: 10,
+    wanderChance: 0.4,
+    avoidRadius: 5,
+    avoidStrength: 1, // ลดลงเพื่อหลบแบบนุ่มนวล
+    facing: Math.random() * Math.PI * 2,
+    rotationSpeed: 0.01,
+    avoidType: "repel",
+    ...props,
 
     step(world) {
       if (!this.isAlive) return;
 
-      // ---------- ลด hunger ----------
-      if (TICK % 10 === 0) this.hunger = Math.max(0, this.hunger - 1);
+      // ---------- ลด hunger และเพิ่มอายุ ----------
+      if (TICK % 50 === 0) this.hunger = Math.max(0, this.hunger - 1);
+
       if (this.hunger <= 0) {
         this.isAlive = false;
+
+        for (let i = 0; i < this.eaten; i++) {
+          const { x: clampedX, y: clampedY } = dropArea(this);
+          world.addAgent(
+            createBusiness({
+              name: "C" + randInt(1000),
+              x: clampedX,
+              y: clampedY,
+            })
+          );
+        }
+
         return;
       }
-      this.age += TICK % WORLD_TICKS_PER_DAY === 0 ? 1 : 0;
+
+      if (TICK % WORLD_TICKS_PER_DAY === 0) this.age++;
+
       // ---------- หา closest business ----------
       const closestBusiness = findClosestTarget(
         this,
         world.agents,
         (other) => other.type === "business"
       );
+      const closestFemale = findClosestTarget(
+        this,
+        world.agents,
+        (other) =>
+          other.gender === "female" &&
+          other.age >= 5 &&
+          other.type === "citizen" &&
+          other.isAlive &&
+          other.reproductionCooldown === 0
+      );
 
-      const shouldWalk = Math.random() < this.wanderChance;
+      const closedBaby = findClosestTarget(
+        this,
+        world.agents,
+        (other) => other.age <= 5 && other.type === "citizen" && other.isAlive
+      );
 
+      const shouldWander = Math.random() < this.wanderChance;
       // ---------- กำหนด target ----------
-      if (closestBusiness && this.hunger < 10) {
+      if (TICK % 50 === 0 && this.gender === "female") {
+        this.reproductionCooldown = Math.max(0, this.reproductionCooldown - 2);
+      }
+
+      if (closedBaby && this.gender === "female") {
+        this.targetX = closedBaby.x ?? this.x;
+        this.targetY = closedBaby.y ?? this.y;
+      }
+      if (closestFemale && this.horny === 100 && this.gender === "male") {
+        this.targetX = closestFemale.x ?? this.x;
+        this.targetY = closestFemale.y ?? this.y;
+      }
+      if (closestBusiness && this.hunger <= 80) {
         this.targetX = closestBusiness.x ?? this.x;
         this.targetY = closestBusiness.y ?? this.y;
-      } else if ((this.targetX == null || this.targetY == null) && shouldWalk) {
+      }
+
+      if (this.targetX == null || this.targetY == null) {
+        this.facing += randInt(-0.75, 0.75, true);
+
         const randomRange = this.visibility ?? 20;
         const randomTargetX =
-          (this.x ?? 0) + (Math.random() * 2 - 1) * this.speed * randomRange;
+          this.x + randInt(-1, 1, true) * this.speed * randomRange;
         const randomTargetY =
-          (this.y ?? 0) + (Math.random() * 2 - 1) * this.speed * randomRange;
-
-        this.targetX = lerp(this.x ?? 0, randomTargetX, 0.3);
-        this.targetY = lerp(this.y ?? 0, randomTargetY, 0.3);
+          this.y + randInt(-1, 1, true) * this.speed * randomRange;
+        this.targetX = lerp(this.x, randomTargetX, 0.3);
+        this.targetY = lerp(this.y, randomTargetY, 0.3);
       }
 
-      // ---------- Move ----------
+      // ---------- หมุนหน้าไปยัง target ----------
       moveToTarget(this, this.targetX, this.targetY, this.speed);
-
       // ---------- Avoid other citizens ----------
-      const avoidRadius = this.avoidRadius ;
-      const avoidStrength = this.avoidStrength;
-      let ax = 0;
-      let ay = 0;
-      for (const other of world.agents) {
-        if (other === this || !other.isAlive) continue;
-        if (other.type !== "citizen") continue;
+      /*   if(TICK % 100 === 0){
 
-        const dx = this.x - other.x;
-        const dy = this.y - other.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist < avoidRadius && dist > 0) {
-          const factor = ((avoidRadius - dist) / avoidRadius) * avoidStrength;
-          ax += (dx / dist) * factor;
-          ay += (dy / dist) * factor;
-        }
+        this.avoidType = ["repel", "attract"][Math.floor(Math.random() * 2)];
       }
-      this.x += ax;
-      this.y += ay;
-
-      // ---------- Keep inside canvas ----------
-      this.x = Math.max(0, Math.min(this.x, WORLD_WIDTH));
-      this.y = Math.max(0, Math.min(this.y, WORLD_HEIGHT));
+       */
+      computeAvoidance(this, world, "repel");
 
       // ---------- Trail ----------
-      this.trail.push({ x: this.x ?? 0, y: this.y ?? 0 });
+      this.trail.push({ x: this.x, y: this.y });
       if (this.trail.length > this.trailLength) this.trail.shift();
 
       // ---------- Business interaction ----------
       for (const ag of world.agents) {
         if (ag.type === "business") {
-          const dx = (ag.x ?? 0) - (this.x ?? 0);
-          const dy = (ag.y ?? 0) - (this.y ?? 0);
+          const dx = ag.x - this.x;
+          const dy = ag.y - this.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-
-          if (dist <= 5) {
-            if (!this.hasEnteredBusiness) {
-              this.hasEnteredBusiness = true;
-              this.lastBusiness = ag.name;
-
-              this.hunger += 10;
-              this.size += 0.5;
-              this.visibility += 1 ;
-              this.money += ag.price ?? 0;
-
-              console.log(`${this.name} entered business ${ag.name}`);
-            }
-          } else {
+          if (dist <= this.size /* && !this.hasEnteredBusiness */) {
+            this.hasEnteredBusiness = true;
+            this.lastBusiness = ag.name;
+            this.hunger += 10;
+            this.size += 1;
+            this.visibility += 1;
+            this.eaten += 1;
+            console.log(`${this.name} entered business ${ag.name}`);
+          } else if (dist > 5) {
             this.hasEnteredBusiness = false;
+          }
+        }
+      }
+
+      for (const ag of world.agents) {
+        if (
+          this.gender === "female" &&
+          this.type === "citizen" &&
+          this.age >= 5 &&
+          ag.isAlive &&
+          ag.age <= 5 &&
+          ag.type === "citizen"
+        ) {
+          const dx = ag.x - this.x;
+          const dy = ag.y - this.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist <= this.size + 10) {
+            this.eaten -= 1;
+            this.hunger -= 10;
+            this.visibility -= 1;
+            this.size -= 1;
+
+            ag.hunger += 10;
+            ag.eaten += 1;
+          }
+        }
+      }
+
+      for (const ag of world.agents) {
+        if (
+          this.gender === "male" &&
+          this.type === "citizen" &&
+          ag.gender === "female" &&
+          ag.isAlive &&
+          ag.age >= 5 &&
+          ag.type === "citizen" &&
+          ag.reproductionCooldown === 0
+        ) {
+          const dx = ag.x - this.x;
+          const dy = ag.y - this.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist <= this.size && this.horny === 100) {
+            const { x: clampedX, y: clampedY } = dropArea(ag);
+
+            world.addAgent(
+              createCitizen({
+                x: clampedX,
+                y: clampedY,
+              })
+            );
+            ag.reproductionCooldown = 100;
+            this.horny = 0;
           }
         }
       }
 
       // ---------- Citizen logic ----------
       this.money += 1;
-      this.hunger += Math.random() > 0.5 ? 1 : -1;
+      this.horny += 0.5;
+      this.horny = Math.min(100, this.horny);
+      this.avoidRadius = this.size;
+      /* this.avoidStrength = this.size * 0.5 */
+      /* this.size = Math.min(30, this.size); */
     },
   };
 }
 
-function createBusiness(name, price = 5, maxAgents = 1) {
+function createBusiness(props = {}) {
   return {
     ...Agent,
     type: "business",
-    name,
     money: 0,
-    price,
-    maxAgents,
+    price: 1,
     currentAgents: 0,
+    maxAgents: 1,
     x: Math.random() * WORLD_WIDTH,
     y: Math.random() * WORLD_HEIGHT,
+    ...props,
 
     step(world) {
       // ปรับราคาแบบสุ่ม
@@ -380,7 +606,7 @@ function createBusiness(name, price = 5, maxAgents = 1) {
         const dy = agent.y - this.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        if (dist <= 5 && agent.type === "citizen") {
+        if (dist <= agent.size && agent.type === "citizen" && agent.isAlive) {
           this.currentAgents += 1;
           agentsNearby.push(agent.name);
           //console.log(agent.name, "near", this.name);
@@ -421,10 +647,9 @@ function maintainBusinesses(world, minCount = 3) {
   const businesses = world.getAgentsByType("business");
   const missing = minCount - businesses.length;
   for (let i = 0; i < missing; i++) {
-    const newB = createBusiness(
-      "B" + Math.floor(Math.random() * 1000),
-      Math.floor(Math.random() * 20 + 5)
-    );
+    const newB = createBusiness({
+      name: "B" + Math.floor(Math.random() * 1000),
+    });
     world.addAgent(newB);
     console.log("New business spawned:", newB.name);
   }
@@ -437,17 +662,36 @@ const sketch = (p) => {
 
     // สร้าง citizen เริ่มต้น
     for (let i = 0; i < MAX_CITIZEN; i++) {
-      World.addAgent(createCitizen("C" + i));
+      World.addAgent(createCitizen());
     }
 
     // สร้าง business เริ่มต้น
+
+    for (let i = 0; i < 500; i++) {
+      World.addAgent(
+        createBusiness({
+          name: "B" + Math.floor(Math.random() * 1000),
+        })
+      );
+    }
   };
 
   p.draw = () => {
     p.background(240);
 
     World.tickWorld();
-    maintainBusinesses(World, 500 / Math.max((TICK / Math.max(WORLD_TICKS_PER_DAY,1)),1));
+    /*  maintainBusinesses(
+      World,
+       World.getAgentsByType("citizen").filter((a) => a.type === "citizen" && a.isAlive).length*0.9 );
+ */
+
+    /*   if(TICK % (WORLD_TICKS_PER_DAY*3) === 0){
+         for (let i = 0; 
+      i <  World.getAgentsByType("citizen").filter((a) => a.type === "citizen" && a.isAlive).length*0.3 ;
+       i++){
+      World.addAgent(createBusiness({name : "B" + Math.floor(Math.random() * 1000)}));
+    }
+    } */
 
     let hoveredAgent = null;
 
@@ -456,7 +700,7 @@ const sketch = (p) => {
       // ใช้สีของ agent หรือ default ถ้าไม่มี
       const [r, g, b] = a.color || [100, 100, 255];
 
-      if (a.type === "citizen") {
+      if (a.type === "citizen" && a.isAlive) {
         // ---------- วาด trail ----------
         p.noFill();
         p.stroke(r, g, b, 150); // สี agent + โปร่งแสง
@@ -478,6 +722,15 @@ const sketch = (p) => {
 
         p.noStroke();
         p.circle(a.x, a.y, a.size);
+
+        // ---------- วาด facing indicator ----------
+        p.stroke(255, 255, 255, 200);
+        p.strokeWeight(2);
+
+        const fx = a.x + Math.cos(a.facing) * (a.size + 10);
+        const fy = a.y + Math.sin(a.facing) * (a.size + 10);
+
+        p.line(a.x, a.y, fx, fy);
       } else if (a.type === "business") {
         // วาด business
         p.fill(200, 100, 50);
@@ -496,9 +749,8 @@ const sketch = (p) => {
     // ================= Click to Create Business =================
     p.mousePressed = () => {
       const name = "B" + Math.floor(Math.random() * 1000);
-      const price = Math.floor(Math.random() * 20 + 5);
 
-      const newBusiness = createBusiness(name, price);
+      const newBusiness = createBusiness({ name: name });
       newBusiness.x = p.mouseX;
       newBusiness.y = p.mouseY;
 
@@ -520,11 +772,14 @@ const sketch = (p) => {
     const businesses = World.getAgentsByType("business");
     const totalMoney = citizens.reduce((sum, c) => sum + c.money, 0);
     const totalAlive = citizens.filter((c) => c.isAlive).length;
-
+    const numMale = citizens.filter((item) => item.gender === "male").length;
+    const numFemale = citizens.filter(
+      (item) => item.gender === "female"
+    ).length;
     p.fill(0);
     p.textSize(14);
 
-    renderSummary(p, [
+    /*   renderSummary(p, [
       `Tick: ${TICK}`,
       `Days: ${Math.floor(TICK / WORLD_TICKS_PER_DAY)}`,
       `Citizens: ${citizens.length}`,
@@ -532,10 +787,72 @@ const sketch = (p) => {
       `hunger: ${citizens[0].hunger}`,
       `Businesses: ${businesses.length}`,
       `Total Money (Citizens): ${totalMoney.toFixed(0)}`,
-      `Gender: ${logJson(citizensGender)}`,
-      `Total Age AVG: ${(citizens.reduce((sum, c) => sum + c.age, 0)/citizens.length).toFixed(2)}`,
+      `Total Age AVG: ${(
+        citizens.reduce((sum, c) => sum + c.age, 0) / citizens.length
+      ).toFixed(2)}`,
+      `Male: ${numMale}`,
+      `Female: ${numFemale}`,
+    ]); */
 
-    ]);
+    /*  const statsDiv = document.getElementById("stats");
+    statsDiv.innerHTML = `
+      <h2>World Stats</h2>
+      <p>Total Citizens: ${citizens.length}</p>
+      <p>Alive Citizens: ${totalAlive}</p>
+      <p>Male: ${numMale}</p>
+      <p>Female: ${numFemale}</p>
+      <p>Total Money: ${totalMoney}</p>
+      <p>Total Businesses: ${businesses.length}</p>
+    `; */
+
+    updateStats();
   };
 };
 new p5(sketch);
+
+let isDragging = false;
+let offsetX = 0;
+let offsetY = 0;
+
+function updateStats() {
+  const statsDiv = document.getElementById("stats");
+  statsDiv.addEventListener("mousedown", (e) => {
+    isDragging = true;
+    offsetX = e.clientX - statsDiv.offsetLeft;
+    offsetY = e.clientY - statsDiv.offsetTop;
+    statsDiv.style.cursor = "grabbing";
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    statsDiv.style.left = `${e.clientX - offsetX}px`;
+    statsDiv.style.top = `${e.clientY - offsetY}px`;
+  });
+
+  window.addEventListener("mouseup", () => {
+    isDragging = false;
+    statsDiv.style.cursor = "grab";
+  });
+
+  const citizens = World.getAgentsByType("citizen");
+  const businesses = World.getAgentsByType("business");
+
+  const totalMoney = citizens.reduce((sum, c) => sum + c.money, 0);
+  const totalAlive = citizens.filter((c) => c.isAlive).length;
+  const numMale = citizens.filter(
+    (c) => c.gender === "male" && c.isAlive
+  ).length;
+  const numFemale = citizens.filter(
+    (c) => c.gender === "female" && c.isAlive
+  ).length;
+
+  statsDiv.innerHTML = `
+    <h2>World Stats</h2>
+    <p>Days: ${Math.floor(TICK / WORLD_TICKS_PER_DAY)} (${TICK})</p>
+    <p>Citizens: ${totalAlive}</p>
+    <p>Male: ${numMale}</p>
+    <p>Female: ${numFemale}</p>
+    
+    <p>Total Businesses: ${businesses.length}</p>
+  `;
+}
