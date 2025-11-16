@@ -1,6 +1,7 @@
 import p5 from "p5";
 import { findClosestTarget } from "./movement";
 import { randInt } from "./helper/math";
+import { size } from "lodash";
 
 function logJson(obj, indent = 2) {
   return JSON.stringify(obj, null, indent);
@@ -131,9 +132,12 @@ const World = {
 
   // ================= Add agent =================
   addAgent(agent, amount = 1) {
+    const list = []
     for (let i = 0; i < amount; i++) {
       this.agents.push(agent);
+      list.push(agent)
     }
+    return list
   },
 
   // ================= Get agents =================
@@ -243,32 +247,40 @@ function moveToTarget(agent, targetX, targetY, speed) {
   agent.x += Math.cos(agent.facing) * moveStep;
   agent.y += Math.sin(agent.facing) * moveStep;
 
-  // Keep inside canvas
+  // Keep inside canvas & bounce แบบสุ่มมุมเล็ก
+  const bounceAngle = Math.PI / 6; // ±30° เด้ง
   let hitBoundary = false;
-  if (agent.x < 0) {
-    agent.x = 0;
+  let border = 0
+
+  if (agent.x < 0 + border) {
+    agent.x = 0 + border;
+    agent.facing = Math.PI - agent.facing + (Math.random() * bounceAngle - bounceAngle/2);
     hitBoundary = true;
   }
-  if (agent.x > WORLD_WIDTH) {
-    agent.x = WORLD_WIDTH;
+  if (agent.x > WORLD_WIDTH - border) {
+    agent.x = WORLD_WIDTH - border;
+    agent.facing = Math.PI - agent.facing + (Math.random() * bounceAngle - bounceAngle/2);
     hitBoundary = true;
   }
-  if (agent.y < 0) {
-    agent.y = 0;
+  if (agent.y < 0 + border) {
+    agent.y = 0 + border;
+    agent.facing = -agent.facing + (Math.random() * bounceAngle - bounceAngle/2);
     hitBoundary = true;
   }
-  if (agent.y > WORLD_HEIGHT) {
-    agent.y = WORLD_HEIGHT;
+  if (agent.y > WORLD_HEIGHT- border) {
+    agent.y = WORLD_HEIGHT- border;
+    agent.facing = -agent.facing + (Math.random() * bounceAngle - bounceAngle/2);
     hitBoundary = true;
   }
 
-  // Clear target
+  // Clear target ถ้าเข้าใกล้ target
   const reachThreshold = speed;
   if (distToTarget < reachThreshold || hitBoundary) {
     agent.targetX = null;
     agent.targetY = null;
   }
 }
+
 
 export function rotateTowardsTarget(agent, targetX, targetY) {
   if (targetX === null || targetY === null) return;
@@ -322,6 +334,7 @@ function computeAvoidance(agent, world, mode = "repel") {
     const dx = other.x - agent.x;
     const dy = other.y - agent.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
+    const combinedSize = agent.size + other.size;
 
     if (dist < agent.avoidRadius && dist > 0) {
       const angleToOther = Math.atan2(dy, dx);
@@ -330,21 +343,47 @@ function computeAvoidance(agent, world, mode = "repel") {
         Math.cos(angleToOther - agent.facing)
       );
 
+      // ---------- ปรับ facing ----------
       if (mode === "repel") {
         angleSum += (diff > 0 ? -1 : 1) * (agent.avoidStrength / (dist + 0.1));
       } else if (mode === "attract") {
         angleSum += diff * (agent.avoidStrength / (dist + 0.1));
       }
 
+      // ---------- ตรวจการชน ----------
+      if (dist < combinedSize) {
+        const overlap = combinedSize - dist;
+        const pushFactor = 0.2; // ขยับ 20% ของ overlap ต่อ step
+
+        // ขยับเฉพาะตัวเล็กกว่า
+        if (agent.size <= other.size) {
+          // เด้งออกด้วยมุมสุ่มเล็ก ±0.2 rad
+          const angle = Math.atan2(dy, dx) + (Math.random() * 0.4 - 0.2);
+          agent.x -= Math.cos(angle) * overlap * pushFactor;
+          agent.y -= Math.sin(angle) * overlap * pushFactor;
+
+          // ปรับ facing แบบ smooth ให้หันไปทางที่เคลื่อนที่ออก
+          const desiredAngle = Math.atan2(agent.y - other.y, agent.x - other.x);
+          const angleDiff = Math.atan2(
+            Math.sin(desiredAngle - agent.facing),
+            Math.cos(desiredAngle - agent.facing)
+          );
+          agent.facing += angleDiff * 0.1;
+        }
+      }
+
       count++;
     }
   }
 
+  // ปรับ facing แบบเฉลี่ย
   if (count > 0) {
     angleSum /= count;
     agent.facing += angleSum;
   }
 }
+
+
 
 const dropArea = (agent) => {
   const angle = Math.random() * Math.PI * 2;
@@ -373,14 +412,15 @@ function createCitizen(props) {
     energy: 100,
     speed: 1.5,
     reproductionCooldown: 0,
-    reproductionChance: 0.001,
+    reproductionChance: 0.001, //! unuse yet
     gender,
-    visibility: 300,
+    visibility: 2500,
     hunger: 50,
     color: gender === "male" ? randomCoolNeon() : randomWarmNeon(),
     isAlive: true,
     attractiveness: randInt(100, true),
     horny: 0,
+    children: [],
 
     type: "citizen",
     name,
@@ -395,7 +435,7 @@ function createCitizen(props) {
     targetY: null,
     wanderChance: 0.4,
     avoidRadius: 5,
-    avoidStrength: 1, // ลดลงเพื่อหลบแบบนุ่มนวล
+    avoidStrength: 3, // ลดลงเพื่อหลบแบบนุ่มนวล
     facing: Math.random() * Math.PI * 2,
     rotationSpeed: 0.01,
     avoidType: "repel",
@@ -426,7 +466,7 @@ function createCitizen(props) {
 
       if (TICK % WORLD_TICKS_PER_DAY === 0) this.age++;
 
-      // ---------- หา closest business ----------
+      // ---------- หา closest target locgic ----------
       const closestBusiness = findClosestTarget(
         this,
         world.agents,
@@ -449,19 +489,35 @@ function createCitizen(props) {
         (other) => other.age <= 5 && other.type === "citizen" && other.isAlive
       );
 
+         const closedBiggest = findClosestTarget(
+        this,
+        world.agents,
+        (other) => other.age <= 5 
+        && other.type === "citizen" 
+        && other.isAlive 
+        && this.size >= Math.max(...world.agents.map(a => a.size))
+      );
+
+
       const shouldWander = Math.random() < this.wanderChance;
       // ---------- กำหนด target ----------
       if (TICK % 50 === 0 && this.gender === "female") {
         this.reproductionCooldown = Math.max(0, this.reproductionCooldown - 2);
       }
 
-      if (closedBaby && this.gender === "female") {
-        this.targetX = closedBaby.x ?? this.x;
-        this.targetY = closedBaby.y ?? this.y;
+      if(closedBiggest){
+        this.targetX = closedBiggest.x ?? this.x;
+        this.targetY = closedBiggest.y ?? this.y;
       }
+   
       if (closestFemale && this.horny === 100 && this.gender === "male") {
         this.targetX = closestFemale.x ?? this.x;
         this.targetY = closestFemale.y ?? this.y;
+      }
+
+      if (closedBaby) {
+        this.targetX = closedBaby.x ?? this.x;
+        this.targetY = closedBaby.y ?? this.y;
       }
       if (closestBusiness && this.hunger <= 80) {
         this.targetX = closestBusiness.x ?? this.x;
@@ -506,7 +562,7 @@ function createCitizen(props) {
             this.hunger += 10;
             this.size += 1;
             this.visibility += 1;
-            this.eaten += 1;
+      /*       this.eaten += 1; */
             console.log(`${this.name} entered business ${ag.name}`);
           } else if (dist > 5) {
             this.hasEnteredBusiness = false;
@@ -514,19 +570,22 @@ function createCitizen(props) {
         }
       }
 
-      for (const ag of world.agents) {
+      // Giving food to baby
+ /*      for (const ag of world.agents) {
         if (
-          this.gender === "female" &&
           this.type === "citizen" &&
           this.age >= 5 &&
           ag.isAlive &&
           ag.age <= 5 &&
-          ag.type === "citizen"
+          ag.type === "citizen" &&
+          this != ag
+
         ) {
           const dx = ag.x - this.x;
           const dy = ag.y - this.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist <= this.size + 10) {
+          
+          if (dist <= this.size) {
             this.eaten -= 1;
             this.hunger -= 10;
             this.visibility -= 1;
@@ -534,10 +593,12 @@ function createCitizen(props) {
 
             ag.hunger += 10;
             ag.eaten += 1;
+            ag.size += 1;
+            
           }
         }
       }
-
+ */
       for (const ag of world.agents) {
         if (
           this.gender === "male" &&
@@ -554,12 +615,15 @@ function createCitizen(props) {
           if (dist <= this.size && this.horny === 100) {
             const { x: clampedX, y: clampedY } = dropArea(ag);
 
-            world.addAgent(
+          const newCitizen = world.addAgent(
               createCitizen({
                 x: clampedX,
                 y: clampedY,
+                size : 8,
               })
             );
+
+            ag.children = [...ag.children, ...newCitizen];
             ag.reproductionCooldown = 100;
             this.horny = 0;
           }
@@ -571,6 +635,7 @@ function createCitizen(props) {
       this.horny += 0.5;
       this.horny = Math.min(100, this.horny);
       this.avoidRadius = this.size;
+
       /* this.avoidStrength = this.size * 0.5 */
       /* this.size = Math.min(30, this.size); */
     },
@@ -612,6 +677,7 @@ function createBusiness(props = {}) {
           //console.log(agent.name, "near", this.name);
           /*   agent.hunger += 10; */
           this.money += this.price;
+          agent.eaten += 1;
         }
       }
 
@@ -727,8 +793,9 @@ const sketch = (p) => {
         p.stroke(255, 255, 255, 200);
         p.strokeWeight(2);
 
-        const fx = a.x + Math.cos(a.facing) * (a.size + 10);
-        const fy = a.y + Math.sin(a.facing) * (a.size + 10);
+const fx = a.x + Math.cos(a.facing) * (Math.max(a.size, 5) + 10);
+const fy = a.y + Math.sin(a.facing) * (Math.max(a.size, 5) + 10);
+
 
         p.line(a.x, a.y, fx, fy);
       } else if (a.type === "business") {
@@ -839,6 +906,7 @@ function updateStats() {
 
   const totalMoney = citizens.reduce((sum, c) => sum + c.money, 0);
   const totalAlive = citizens.filter((c) => c.isAlive).length;
+  const totalEat = citizens.filter((c) => c.isAlive).reduce((sum, c) => sum + c.eaten, 0);
   const numMale = citizens.filter(
     (c) => c.gender === "male" && c.isAlive
   ).length;
@@ -852,7 +920,7 @@ function updateStats() {
     <p>Citizens: ${totalAlive}</p>
     <p>Male: ${numMale}</p>
     <p>Female: ${numFemale}</p>
-    
+    <p>Total Eat: ${totalEat}</p>
     <p>Total Businesses: ${businesses.length}</p>
   `;
 }
