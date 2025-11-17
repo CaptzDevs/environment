@@ -37,7 +37,7 @@ const Agent = {
     this.y += Math.random() * 4 - 2;
   },
   info() {
-    return `${this.type} ${this.agentName} | Money: ${this.money} | hunger: ${this.hunger}`;
+    return `${this.type} ${this.agentName} | Gender: ${this.gender} | att: ${this.attractiveness}`;
   },
 };
 
@@ -130,6 +130,9 @@ const WorldRules = {
 const World = {
   agents: [],
   agentsDead: [],
+
+  maxAttractiveness: 0,
+  maxSize: 0,
   // ================= Add agent =================
   addAgent(agent, amount = 1) {
     const list = [];
@@ -188,6 +191,18 @@ const World = {
   step() {
     // ให้ agent ทำงาน
     this.agents.forEach((a) => a.step(this));
+
+    this.maxAttractiveness = Math.max(
+      ...this.agents.map((a) =>
+        a.isAlive && a.type === "citizen" ? a.attractiveness : 0
+      )
+    );
+
+    this.maxSize = Math.max(
+      ...this.agents.map((a) =>
+        a.isAlive && a.type === "citizen" ? a.size : 0
+      )
+    );
     // Apply world rules หลัง agent ทำงาน
     this.applyRules();
   },
@@ -429,14 +444,15 @@ function setRandomTarget(agent) {
 
   // ระยะสุ่ม
   const randomRange = agent.visibility ?? 20;
-  const randomTargetX = agent.x + randInt(-1, 1, true) * agent.speed * randomRange;
-  const randomTargetY = agent.y + randInt(-1, 1, true) * agent.speed * randomRange;
+  const randomTargetX =
+    agent.x + randInt(-1, 1, true) * agent.speed * randomRange;
+  const randomTargetY =
+    agent.y + randInt(-1, 1, true) * agent.speed * randomRange;
 
   // ใช้ lerp เพื่อให้การเคลื่อนที่ smooth
   agent.targetX = lerp(agent.x, randomTargetX, 0.3);
   agent.targetY = lerp(agent.y, randomTargetY, 0.3);
 }
-
 
 // ================= Factory Functions =================
 function createCitizen(props) {
@@ -449,21 +465,20 @@ function createCitizen(props) {
     age: 0,
     energy: 100,
     speed: 1,
+    gender,
     reproductionCooldown: 0,
     reproductionChance: 0.001, //! unuse yet
-    gender,
+    matingDrive: 0,
     visibility: 2500,
-    hunger: 50,
     color: gender === "male" ? randomCoolNeon() : randomWarmNeon(),
     isAlive: true,
-    attractiveness: randInt(100, true),
-    horny: 0,
+    attractiveness: gender === "female" ? randInt(0, 100, true) : 0,
     children: [],
 
     type: "citizen",
+    hunger: 50,
     eaten: 0,
     money: 100,
-
 
     // Movement
     trail: [],
@@ -524,43 +539,42 @@ function createCitizen(props) {
         this,
         world.agents,
         (other) =>
+          this.attractiveness != world.maxAttractiveness &&
           other.type === "citizen" &&
           other.isAlive &&
-          other.size >=
-            Math.max(
-              ...world.agents.map((a) =>
-                a.size && a.type === "citizen" && a.isAlive ? a.size : 0
-              )
-            )
+          other.size >= world.size
       );
 
       // closedBaby
       findAndSetTarget(
         this,
         world.agents,
-        (other) => other.age <= 5 && other.type === "citizen" && other.isAlive
+        (other) =>
+          this.gender === "female" &&
+          other.age <= 5 &&
+          other.type === "citizen" &&
+          other.isAlive
       );
 
-      // closestFemale
+      // closestFemale with most attractiveness
       findAndSetTarget(
         this,
         world.agents,
         (other) =>
-          this.horny === 100 &&
+          this.matingDrive === 100 &&
           this.gender === "male" &&
           other.gender === "female" &&
           other.age >= 3 &&
           other.type === "citizen" &&
           other.isAlive &&
-          other.reproductionCooldown === 0
+          other.attractiveness === world.maxAttractiveness
       );
 
       // closestBusiness
       findAndSetTarget(
         this,
         world.agents,
-        (other) =>
-           other.type === "business" 
+        (other) => other.type === "business"
       );
 
       // ---------- Wander (No target) ----------
@@ -601,16 +615,17 @@ function createCitizen(props) {
         }
       }
 
-      // Giving food to baby
+      // Female Giving food to baby
       for (const ag of world.agents) {
         if (
           this.type === "citizen" &&
           this.age >= 5 &&
-          ag.isAlive &&
-          ag.age <= 5 &&
-          ag.type === "citizen" &&
+          this.gender === "female" &&
+          this.eaten > 0 &&
           this != ag &&
-          this.eaten > 0
+          ag.isAlive &&
+          ag.age < 5 &&
+          ag.type === "citizen"
         ) {
           const dx = ag.x - this.x;
           const dy = ag.y - this.y;
@@ -629,7 +644,36 @@ function createCitizen(props) {
         }
       }
 
-      //ฺBreed and produce children
+      // Male Giving food to Most Attractive
+      for (const ag of world.agents) {
+        if (
+          this.type === "citizen" &&
+          this.age >= 5 &&
+          this.gender === "male" &&
+          this != ag &&
+          this.eaten > 0 &&
+          ag.isAlive &&
+          ag.type === "citizen" &&
+          ag.attractiveness >= world.maxAttractiveness
+        ) {
+          const dx = ag.x - this.x;
+          const dy = ag.y - this.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist <= this.size) {
+            this.eaten -= 1;
+            this.hunger -= 10;
+            this.visibility -= 1;
+            this.size -= 1;
+
+            ag.hunger += 10;
+            ag.eaten += 1;
+            ag.size += 1;
+          }
+        }
+      }
+
+      //ฺ Breed and produce children
       for (const ag of world.agents) {
         if (
           this.gender === "male" &&
@@ -643,7 +687,7 @@ function createCitizen(props) {
           const dx = ag.x - this.x;
           const dy = ag.y - this.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist <= this.size && this.horny === 100) {
+          if (dist <= this.size && this.matingDrive === 100) {
             const { x: clampedX, y: clampedY } = dropArea(ag);
 
             const newCitizen = world.addAgent(
@@ -656,15 +700,14 @@ function createCitizen(props) {
 
             ag.children = [...ag.children, ...newCitizen];
             ag.reproductionCooldown = 100;
-            this.horny = 0;
+            this.matingDrive = 0;
           }
         }
       }
 
       // ---------- Citizen logic ----------
-      this.money += 1;
-      this.horny += 0.5;
-      this.horny = Math.min(100, this.horny);
+      this.matingDrive += 0.5;
+      this.matingDrive = Math.min(100, this.matingDrive);
       this.avoidRadius = this.size;
 
       /* this.avoidStrength = this.size * 0.5 */
@@ -720,9 +763,9 @@ function createBusiness(props = {}) {
         if (index !== -1) {
           /*  world.agents.splice(index, 1); */
           console.log(
-            `${this.agentName} destroyed due to overcrowding by: ${agentsNearby.join(
-              ", "
-            )}`
+            `${
+              this.agentName
+            } destroyed due to overcrowding by: ${agentsNearby.join(", ")}`
           );
         }
       }
@@ -817,17 +860,39 @@ const sketch = (p) => {
         p.circle(a.x, a.y, a.visibility);
 
         // ---------- วาดตัว citizen ----------
-        a.isAlive === true ? p.fill(r, g, b) : p.fill(114, 114, 114); // สี agent + โปร่งแสง
+        // ---------- วาดตัว citizen ----------
+        if (a.isAlive) {
+          p.fill(r, g, b); // สีปกติ
+        } else {
+          p.fill(114, 114, 114); // สีตาย
+        }
 
-        p.noStroke();
+        // ถ้าเป็นตัวที่น่าดึงดูดที่สุด ให้เน้นสีและ stroke
+        if (
+          a.attractiveness === World.maxAttractiveness &&
+          a.gender === "female"
+        ) {
+          p.fill(255, 141, 161);
+          p.stroke(255, 125, 125);
+          p.strokeWeight(5);
+        } else {
+          p.noStroke();
+        }
+
+        // วาดวงกลมตัว citizen
         p.circle(a.x, a.y, a.size);
 
         // ---------- วาด facing indicator ----------
         p.stroke(255, 255, 255, 200);
         p.strokeWeight(2);
 
-        const fx = a.x + Math.cos(a.facing) * (Math.max(a.size, 5) + 10);
-        const fy = a.y + Math.sin(a.facing) * (Math.max(a.size, 5) + 10);
+        // Normal facing indicator
+        /* const fx = a.x + Math.cos(a.facing) * (Math.max(a.size, 5) + 10);
+        const fy = a.y + Math.sin(a.facing) * (Math.max(a.size, 5) + 10); */
+
+        //  facing indicator to target
+        const fx = a.targetX + Math.cos(a.facing) * Math.max(a.size, 5);
+        const fy = a.targetY + Math.sin(a.facing) * Math.max(a.size, 5);
 
         p.line(a.x, a.y, fx, fy);
       } else if (a.type === "business") {
@@ -957,5 +1022,7 @@ function updateStats() {
     <p>Female: ${numFemale}</p>
     <p>Total Eat: ${totalEat}</p>
     <p>Total Businesses: ${businesses.length}</p>
+    <p>Most attractiveness: ${World.maxAttractiveness.toFixed(2)}</p>
+    
   `;
 }
