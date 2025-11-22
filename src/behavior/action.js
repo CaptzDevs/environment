@@ -45,6 +45,30 @@ export const Actions = {
         }
       }
     },
+    attack: (world, agent, ag, dist) => {
+      if (
+        agent.type === "citizen" &&
+        agent.age >= 5 &&
+        agent.gender === "male" &&
+        agent.matingDrive === 100 &&
+        ag.gender === "male" &&
+        agent != ag &&
+        ag.isAlive &&
+        ag.age >= 5 &&
+        ag.type === "citizen" 
+      ) {
+        if (dist <= ag.size) {
+            if(agent.size > ag.szie){
+                agent.hunger += 20;
+                ag.hunger -= 20;
+            }else{
+                ag.hunger += 20;
+                agent.hunger -= 20;
+            }
+       
+        }
+      }
+    },
     giveFoodToFemaleWithMostAttractive: (world, agent, ag, dist) => {
       if (
         agent.type === "citizen" &&
@@ -85,7 +109,7 @@ export const Actions = {
           const { x: clampedX, y: clampedY } = dropArea(ag);
           const breedingChance = Math.random();
           if (breedingChance > ag.reproductionChance) {
-            for (let i = 0; i < randInt(1, 3); i++) {
+            for (let i = 0; i < randInt(1, 2); i++) {
               const newCitizen = world.addAgent(
                 createCitizen({
                   x: clampedX,

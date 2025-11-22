@@ -4,7 +4,9 @@ import {
   dropArea,
   findAndSetTarget,
   findClosestTarget,
+  fleeAgent,
   moveToTarget,
+  randomDropArea,
   setRandomTarget,
 } from "./helper/movement";
 import { randInt } from "./helper/math";
@@ -30,7 +32,7 @@ const VISUAL_SETTING = {
   trailLength: 100,
   trailAlpha: 0.1,
   trailColor: [255, 255, 255],
-  facingSensor: false,
+  facingSensor: true,
   facingSensorColor: [255, 0, 0],
 };
 // ================= World Blueprint =================
@@ -281,12 +283,12 @@ export function createCitizen(props) {
     size: 8,
     age: 0,
     energy: 100,
-    speed: 1,
+    speed: 2,
     gender,
     reproductionCooldown: 100,
-    reproductionChance: 0.5, 
+    reproductionChance: 0.5,
     matingDrive: 0, // ความอยากที่จะผสมพันธุ์
-    visibility: 2500,
+    visibility: 100,
     color: gender === "male" ? randomCoolNeon() : randomWarmNeon(),
     isAlive: true,
     attractiveness: gender === "female" ? randInt(0, 100, true) : 0,
@@ -319,16 +321,6 @@ export function createCitizen(props) {
       this.avoidRadius = this.size;
 
       if (!this.isAlive) {
-        this.eaten = 0;
-        world.agentsDead.push(this);
-        world.removeAgentsBy((a) => a === this);
-        return;
-      }
-
-      // Death
-      if (this.hunger <= 0) {
-        this.isAlive = false;
-
         for (let i = 0; i < this.eaten; i++) {
           const { x: clampedX, y: clampedY } = dropArea(this);
           world.addAgent(
@@ -339,10 +331,19 @@ export function createCitizen(props) {
             })
           );
         }
+        this.eaten = 0;
+        world.agentsDead.push(this);
+        world.removeAgentsBy((a) => a === this);
         return;
       }
 
-    /*   if(this.attractiveness === world.maxAttractiveness && this.gender === 'female'){
+      // Death
+      if (this.hunger <= 0) {
+        this.isAlive = false;
+        return;
+      }
+
+      /*   if(this.attractiveness === world.maxAttractiveness && this.gender === 'female'){
         this.size = 100
         this.hunger = 100
       } */
@@ -360,23 +361,50 @@ export function createCitizen(props) {
 
       // ---------- หา closest target locgic ----------
 
+      setRandomTarget(this);
       // closedBiggest
-      //Behavior.target.agent.biggest(world, this);
+      Behavior.target.agent.biggest(world, this);
 
       // closedBaby
       Behavior.target.agent.baby(world, this);
 
       // closestFemale with most attractiveness
       Behavior.target.agent.femaleWithMostAttractiveness(world, this);
-
+      // closestMale to fight
+      Behavior.target.agent.goFight(world, this);
       // closestBusiness
       Behavior.target.resource.food(world, this);
 
+      const threat = findClosestTarget(this, world.agents, (other) => {
+        // เงื่อนไขให้ถือเป็น threat
+        return (
+          this.gender === "male" &&
+          other.gender === "male" &&
+          other.matingDrive === 100 &&
+          other.age >= 5 &&
+          other.type === "citizen" &&
+          other.isAlive &&
+          other.size > this.size
+        );
+      });
+
+      const SAFE_DISTANCE = 80;
+      if (threat) {
+        const dx = threat.x - this.x;
+        const dy = threat.y - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist <= SAFE_DISTANCE) {
+          fleeAgent(this, threat); // หนีจาก threat
+        } else {
+          moveToTarget(this, this.targetX, this.targetY, this.speed);
+        }
+      } else {
+        moveToTarget(this, this.targetX, this.targetY, this.speed);
+      }
       // ---------- Wander (No target) ----------
-      setRandomTarget(this);
 
       // ---------- หมุนหน้าไปยัง target ----------
-      moveToTarget(this, this.targetX, this.targetY, this.speed);
       // ---------- Avoid other citizens ----------
       /*   if(TICK % 100 === 0){
         this.avoidType = ["repel", "attract"][randInt(0,1)];
@@ -408,6 +436,8 @@ export function createCitizen(props) {
         );
         //ฺ Breed and produce children
         Behavior.action.resource.breeding(world, this, ag, dist);
+
+        Behavior.action.resource.attack(world, this, ag, dist);
       }
 
       /* this.avoidStrength = this.size * 0.5 */
@@ -424,8 +454,24 @@ export function createBusiness(props = {}) {
     price: 1,
     currentAgents: 0,
     maxAgents: 1,
-    x: Math.random() * WORLD_WIDTH,
-    y: Math.random() * WORLD_HEIGHT,
+
+    size: 8,
+    speed: 0.5,
+    gender: "male",
+    visibility: 100,
+
+    // Movement
+    trail: [],
+    trailLength: 100,
+    x: Math.random() * WORLD_WIDTH, // ±100 รอบกลาง
+    y: Math.random() * WORLD_HEIGHT, // ±100 รอบกลาง
+    targetX: null,
+    targetY: null,
+    wanderChance: 0.4,
+    avoidRadius: 5,
+    avoidStrength: 3, // ลดลงเพื่อหลบแบบนุ่มนวล
+    facing: Math.random() * Math.PI * 2,
+    rotationSpeed: 1,
     ...props,
 
     step(world) {
@@ -434,6 +480,18 @@ export function createBusiness(props = {}) {
         this.price = Math.max(1, this.price + (Math.random() > 0.5 ? 1 : -1));
       }
 
+      const threat = findClosestTarget(this, world.agents, (other) => {
+        // เงื่อนไขให้ถือเป็น threat
+        return other.type === "citizen" && other.isAlive;
+      });
+
+      if (threat) {
+        fleeAgent(this, threat);
+      } else {
+        setRandomTarget(this);
+        moveToTarget(this, this.targetX, this.targetY, this.speed);
+      }
+      // ---------- หมุนหน้าไปยัง target ----------
       // รีเซ็ต counter และเก็บรายชื่อ citizen รอบตัว
       this.currentAgents = 0;
       const agentsNearby = [];
@@ -506,10 +564,7 @@ async function preload(p) {
     "/public/588002060_18551522035038884_7988235702011641822_n-removebg-preview.png"
   );
 
-    img2 = await p.loadImage(
-    "/public/744165701522693-removebg-preview.png"
-  );
-  
+  img2 = await p.loadImage("/public/744165701522693-removebg-preview.png");
 }
 // ================= p5.js Sketch =================
 const sketch = (p) => {
@@ -542,12 +597,31 @@ const sketch = (p) => {
       World,
        World.getAgentsByType("citizen").filter((a) => a.type === "citizen" && a.isAlive).length*0.9 );
  */
-
     if (World.tick % (World.worldTicksPerDay * 50) === 0) {
-      for (let i = 0; i < 50; i++) {
-        World.addAgent(
-          createBusiness({ agentName: "B" + Math.floor(Math.random() * 1000) })
-        );
+      const numClusters = 5; // กำหนดจำนวนกลุ่ม
+      const clusterSize = 5; // จำนวนตัวต่อกลุ่ม
+      const clusterRadius = 30;
+
+      for (let c = 0; c < numClusters; c++) {
+        // จุดศูนย์กลางของกลุ่ม
+        const centerX = randInt(0, WORLD_WIDTH);
+        const centerY = randInt(0, WORLD_HEIGHT);
+
+        for (let i = 0; i < clusterSize; i++) {
+          // วางรอบ ๆ ศูนย์กลางเล็กน้อย
+          const x = centerX + randInt(-clusterRadius, clusterRadius);
+          const y = centerY + randInt(-clusterRadius, clusterRadius);
+
+          const { x: clampedX, y: clampedY } = randomDropArea(x, y);
+
+          World.addAgent(
+            createBusiness({
+              agentName: "B" + Math.floor(Math.random() * 1000),
+              x: clampedX,
+              y: clampedY,
+            })
+          );
+        }
       }
     }
 
@@ -584,8 +658,9 @@ const sketch = (p) => {
         // ถ้าเป็นตัวดึงดูดที่สุด + female + มีรูป → ไม่วาดวงกลมสีเลย
         const isSpecial =
           a.attractiveness === World.maxAttractiveness &&
-          a.gender === "female" 
-          &&img && img2
+          a.gender === "female" &&
+          img &&
+          img2;
 
         if (!isSpecial) {
           // วาดวงกลมปกติ
@@ -601,24 +676,23 @@ const sketch = (p) => {
 
         // ------ วาดภาพแทนวงกลม ------
         if (isSpecial) {
-        /*   p.noStroke();
+          /*   p.noStroke();
           p.noFill();
           if(a.reproductionCooldown > 0){
             p.image(img, a.x - a.size / 2, a.y - a.size / 2, a.size, a.size);
           }else{
             p.image(img2, a.x - a.size / 2, a.y - a.size / 2, a.size, a.size);
           } */
-              p.fill(255, 141, 161);
+          p.fill(255, 141, 161);
           p.stroke(255, 125, 125);
           p.strokeWeight(5);
           p.circle(a.x, a.y, a.size);
-
         }
 
         // วาดวงกลมตัว citizen
 
         // ---------- วาด facing indicator ----------
-        if (VISUAL_SETTING.facingIndicator) {
+        if (VISUAL_SETTING.facingSensor) {
           p.stroke(255, 255, 255, 200);
           p.strokeWeight(2);
         }

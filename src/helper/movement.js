@@ -36,6 +36,7 @@ export function findClosestTarget(agent, worldAgents, condition) {
 }
 
 
+
 export function findAndSetTarget(agent, worldAgents, condition) {
   const target = findClosestTarget(agent, worldAgents, condition);
 
@@ -46,6 +47,7 @@ export function findAndSetTarget(agent, worldAgents, condition) {
 
   return target;
 }
+
 
 /**
  * กำหนด target แบบสุ่มให้ agent
@@ -58,7 +60,7 @@ export function setRandomTarget(agent) {
   agent.facing += randInt(-0.75, 0.75, true);
 
   // ระยะสุ่ม
-  const randomRange = agent.visibility ?? 20;
+  const randomRange = /* agent.visibility ?? */ 2500;
   const randomTargetX =
     agent.x + randInt(-1, 1, true) * agent.speed * randomRange;
   const randomTargetY =
@@ -248,3 +250,69 @@ export const dropArea = (agent) => {
 
   return { x: clampedX, y: clampedY };
 };
+
+export const randomDropArea = (x,y) => {
+  const angle = Math.random() * Math.PI * 2;
+
+  // ระยะ drop แบบ 15–30
+  const dist = randInt(15, 30);
+
+  const dropX = x + Math.cos(angle) * dist;
+  const dropY = y + Math.sin(angle) * dist;
+
+  // ป้องกันไม่ให้ออกนอก world
+  const clampedX = Math.max(0, Math.min(dropX, WORLD_WIDTH));
+  const clampedY = Math.max(0, Math.min(dropY, WORLD_HEIGHT));
+
+  return { x: clampedX, y: clampedY };
+};
+
+
+export function fleeAgent(agent, threat) {
+  // คำนวณ vector หนี
+  let dx = agent.x - threat.x;
+  let dy = agent.y - threat.y;
+  let dist = Math.sqrt(dx * dx + dy * dy);
+
+  const fleeSpeed = agent.speed ?? 2;
+
+  // ป้องกัน div/0
+  if (dist === 0) {
+    dx = Math.random() - 0.5;
+    dy = Math.random() - 0.5;
+    dist = Math.sqrt(dx * dx + dy * dy);
+  }
+
+  agent.x += (dx / dist) * fleeSpeed;
+  agent.y += (dy / dist) * fleeSpeed;
+
+  // ------- Clamp ให้อยู่ใน WORLD -------
+  let atEdge = false;
+  if (agent.x < 0) {
+    agent.x = 0;
+    atEdge = true;
+  }
+  if (agent.y < 0) {
+    agent.y = 0;
+    atEdge = true;
+  }
+  if (agent.x > WORLD_WIDTH) {
+    agent.x = WORLD_WIDTH;
+    atEdge = true;
+  }
+  if (agent.y > WORLD_HEIGHT) {
+    agent.y = WORLD_HEIGHT;
+    atEdge = true;
+  }
+
+  // ------- หากติดขอบ ให้หนีไปทางอื่น -------
+  if (atEdge) {
+    const angle = Math.random() * 2 * Math.PI;
+    agent.x += Math.cos(angle) * fleeSpeed * 2;
+    agent.y += Math.sin(angle) * fleeSpeed * 2;
+
+    // Clamp อีกครั้งเพื่อความปลอดภัย
+    agent.x = Math.max(0, Math.min(agent.x, WORLD_WIDTH));
+    agent.y = Math.max(0, Math.min(agent.y, WORLD_HEIGHT));
+  }
+}
