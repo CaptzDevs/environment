@@ -3,11 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+      <link href="/src/style.css" rel="stylesheet">
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>environment</title>
   </head>
   <style>
-    #stats {
+    .dialog {
       position: absolute;
       top: 20px;
       left: 20px;
@@ -21,7 +22,7 @@
       height: fit-content !important;
     }
 
-    #stats h2 {
+    .dialog h2 {
       margin: 0 0 10px 0;
       font-size: 18px;
       text-align: center;
@@ -29,7 +30,7 @@
       text-shadow: 0 1px 2px #000;
     }
 
-    #stats p {
+    .dialog p {
       margin: 6px 0;
       font-size: 14px;
       line-height: 1.4;
@@ -37,13 +38,21 @@
       padding-bottom: 4px;
     }
 
-    #stats p:last-child {
+    .dialog p:last-child {
       border-bottom: none;
     }
   </style>
   <body>
     <div id="app"></div>
           <script type="module" src="/src/main.js"></script>
-    <div id="stats">Loading</div>
+    <div class="dialog bg-red-300" id="stats">Loading</div>
+    
+    <div class="fixed bottom-5 left-1/2 -translate-x-1/2 bg-gray-800/40 backdrop-blur-2xl text-white py-2 px-3 rounded-sm 
+
+    ">
+      Loading
+    </div>
+
+
   </body>
 </html>

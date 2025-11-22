@@ -12,8 +12,10 @@
     "vite": "^7.2.2"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.1.17",
     "lodash": "^4.17.21",
     "nodemon": "^3.1.11",
-    "p5": "^2.1.1"
+    "p5": "^2.1.1",
+    "tailwindcss": "^4.1.17"
   }
 }

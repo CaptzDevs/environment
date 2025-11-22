@@ -18,6 +18,16 @@ const WORLD_TICKS_PER_DAY = 100;
 const TICK_SPEED = 0.5;
 
 const GENDERS = ["male", "female"];
+
+const VISUAL_SETTING = {
+  trail: false,
+  visibility: false,
+  trailLength: 100,
+  trailAlpha: 0.1,
+  trailColor: [255, 255, 255],
+  facingSensor: false,
+  facingSensorColor: [255, 0, 0],
+};
 // ================= World Blueprint =================
 
 // ================= Agent Blueprint =================
@@ -844,20 +854,24 @@ const sketch = (p) => {
 
       if (a.type === "citizen" && a.isAlive) {
         // ---------- วาด trail ----------
-        p.noFill();
-        p.stroke(r, g, b, 150); // สี agent + โปร่งแสง
-        p.strokeWeight(1); // เส้นหนา 10px
-        p.beginShape();
-        for (const [index, pos] of a.trail.entries()) {
-          p.vertex(pos.x, pos.y);
+        if (VISUAL_SETTING.trail) {
+          p.noFill();
+          p.stroke(r, g, b, 150); // สี agent + โปร่งแสง
+          p.strokeWeight(1); // เส้นหนา 10px
+          p.beginShape();
+          for (const [index, pos] of a.trail.entries()) {
+            p.vertex(pos.x, pos.y);
+          }
+          p.endShape();
         }
-        p.endShape();
 
         // ---------- วาด visibility ----------
-        p.noFill();
+        if(VISUAL_SETTING.visibility){
+             p.noFill();
         p.stroke(r, g, b, 50); // สีโปร่งแสง
         p.strokeWeight(5); // เส้นหนา 10px
         p.circle(a.x, a.y, a.visibility);
+        }
 
         // ---------- วาดตัว citizen ----------
         // ---------- วาดตัว citizen ----------
@@ -883,8 +897,10 @@ const sketch = (p) => {
         p.circle(a.x, a.y, a.size);
 
         // ---------- วาด facing indicator ----------
+        if(VISUAL_SETTING.facingIndicator){
         p.stroke(255, 255, 255, 200);
-        p.strokeWeight(2);
+        p.strokeWeight(2);;
+        }
 
         // Normal facing indicator
         /* const fx = a.x + Math.cos(a.facing) * (Math.max(a.size, 5) + 10);
@@ -975,29 +991,51 @@ const sketch = (p) => {
 new p5(sketch);
 
 let isDragging = false;
+let draggedItem = null;
 let offsetX = 0;
 let offsetY = 0;
+let zIndexCounter = 10;
 
-function updateStats() {
-  const statsDiv = document.getElementById("stats");
-  statsDiv.addEventListener("mousedown", (e) => {
-    isDragging = true;
-    offsetX = e.clientX - statsDiv.offsetLeft;
-    offsetY = e.clientY - statsDiv.offsetTop;
-    statsDiv.style.cursor = "grabbing";
+function initDraggableDialogs() {
+  const dialogs = document.querySelectorAll(".dialog");
+
+  dialogs.forEach((item) => {
+    item.style.position = "absolute";
+    item.style.cursor = "grab";
+
+    item.addEventListener("mousedown", (e) => {
+      isDragging = true;
+      draggedItem = item;
+
+      offsetX = e.clientX - item.offsetLeft;
+      offsetY = e.clientY - item.offsetTop;
+
+      // bring on top
+      zIndexCounter++;
+      item.style.zIndex = zIndexCounter;
+
+      item.style.cursor = "grabbing";
+    });
   });
 
   window.addEventListener("mousemove", (e) => {
-    if (!isDragging) return;
-    statsDiv.style.left = `${e.clientX - offsetX}px`;
-    statsDiv.style.top = `${e.clientY - offsetY}px`;
+    if (!isDragging || !draggedItem) return;
+
+    draggedItem.style.left = `${e.clientX - offsetX}px`;
+    draggedItem.style.top = `${e.clientY - offsetY}px`;
   });
 
   window.addEventListener("mouseup", () => {
+    if (draggedItem) draggedItem.style.cursor = "grab";
     isDragging = false;
-    statsDiv.style.cursor = "grab";
+    draggedItem = null;
   });
+}
 
+initDraggableDialogs();
+
+function updateStats() {
+  const statsDivs = document.getElementById("stats");
   const citizens = World.getAgentsByType("citizen");
   const businesses = World.getAgentsByType("business");
 
@@ -1006,6 +1044,7 @@ function updateStats() {
   const totalEat = citizens
     .filter((c) => c.isAlive)
     .reduce((sum, c) => sum + c.eaten, 0);
+
   const numMale = citizens.filter(
     (c) => c.gender === "male" && c.isAlive
   ).length;
@@ -1013,16 +1052,19 @@ function updateStats() {
     (c) => c.gender === "female" && c.isAlive
   ).length;
 
-  statsDiv.innerHTML = `
-    <h2>World Stats</h2>
-    <p>Days: ${Math.floor(TICK / WORLD_TICKS_PER_DAY)} (${TICK})</p>
-    <p>Alive: ${totalAlive}</p>
-    <p>Dead: ${World.agentsDead.length}</p>
-    <p>Male: ${numMale}</p>
-    <p>Female: ${numFemale}</p>
-    <p>Total Eat: ${totalEat}</p>
-    <p>Total Businesses: ${businesses.length}</p>
-    <p>Most attractiveness: ${World.maxAttractiveness.toFixed(2)}</p>
-    
-  `;
+  statsDivs.innerHTML = `
+      <h2>World Stats</h2>
+      <p>Days: ${Math.floor(TICK / WORLD_TICKS_PER_DAY)} (${TICK})</p>
+      <p>Alive: ${totalAlive}</p>
+      <p>Dead: ${World.agentsDead.length}</p>
+      <p>Male: ${numMale}</p>
+      <p>Female: ${numFemale}</p>
+      <p>Total Eat: ${totalEat}</p>
+      <p>Total Businesses: ${businesses.length}</p>
+      <p>Most attractiveness: ${World.maxAttractiveness.toFixed(2)}</p>
+      <div class='flex flex-col gap-2'>
+         
+      </div>
+
+    `;
 }
