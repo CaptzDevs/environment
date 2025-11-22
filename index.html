@@ -1,9 +1,9 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-      <link href="/src/style.css" rel="stylesheet">
+    <link href="/src/style.css" rel="stylesheet" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>environment</title>
   </head>
@@ -13,13 +13,15 @@
       top: 20px;
       left: 20px;
       width: 220px;
-      background: rgba(30, 30, 40, 0.667);
+      background: rgba(30, 30, 40, 0.941);
       color: #fff;
-      font-family: 'Arial', sans-serif;
+      font-family: "Arial", sans-serif;
       padding: 15px 20px;
       border-radius: 12px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
       height: fit-content !important;
+      user-select: none;
+       box-sizing: border-box; 
     }
 
     .dialog h2 {
@@ -34,25 +36,53 @@
       margin: 6px 0;
       font-size: 14px;
       line-height: 1.4;
-      border-bottom: 1px solid rgba(255,255,255,0.2);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
       padding-bottom: 4px;
     }
 
     .dialog p:last-child {
       border-bottom: none;
     }
+
+    .content {
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+      padding: 10px;
+      box-sizing: border-box;
+    }
+
+    .resize-handle {
+      width: 12px;
+      height: 12px;
+      background: #666;
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      cursor: se-resize;
+    }
   </style>
   <body>
     <div id="app"></div>
-          <script type="module" src="/src/main.js"></script>
-    <div class="dialog bg-red-300" id="stats">Loading</div>
-    
-    <div class="fixed bottom-5 left-1/2 -translate-x-1/2 bg-gray-800/40 backdrop-blur-2xl text-white py-2 px-3 rounded-sm 
+    <script type="module" src="/src/main.js"></script>
 
-    ">
+    <div class="dialog">
+      <div class="content">
+        <canvas id="populationChart" width="800" height="400"></canvas>
+      </div>
+      <div class="resize-handle"></div>
+    </div>
+    <div class="dialog">
+      <div class="content" id="stats">Drag me!</div>
+      <div class="resize-handle"></div>
+    </div>
+
+    <div
+      class="fixed bottom-5 left-1/2 -translate-x-1/2 bg-gray-800/40 backdrop-blur-2xl text-white py-2 px-3 rounded-sm"
+    >
       Loading
     </div>
 
-
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </body>
 </html>
