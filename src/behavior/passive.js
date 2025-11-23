@@ -5,7 +5,6 @@ import { createBusiness } from "../main";
 export const Passives = {
   agent: {
     death: (world, agent) => {
-
       if (agent.hunger <= 0) {
         agent.isAlive = false;
 
@@ -23,17 +22,19 @@ export const Passives = {
       }
     },
     reproductionCooldown: (world, agent) => {
-         if (world.tick % 50 === 0 && agent.gender === "female") {
-        agent.reproductionCooldown = Math.max(0, agent.reproductionCooldown - 5);
+      if (world.tick % 50 === 0 && agent.gender === "female") {
+        agent.behaviors.reproduction.cooldown = Math.max(
+          0,
+          agent.behaviors.reproduction.cooldown - agent.behaviors.reproduction.cooldownStep
+        );
       }
     },
-    ageUp : (world, agent) => {
-          if (world.tick % world.worldTicksPerDay === 0) agent.age++;
+    ageUp: (world, agent) => {
+      if (world.tick % world.worldTicksPerDay === 0) agent.age++;
     },
 
-    hungerDecay : (world, agent) => {
-        if (world.tick % 50 === 0) agent.hunger = Math.max(0, agent.hunger - 1);
-    }
+    hungerDecay: (world, agent) => {
+      if (world.tick % 50 === 0) agent.hunger = Math.max(0, agent.hunger - 1);
+    },
   },
 };
-

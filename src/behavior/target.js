@@ -35,7 +35,23 @@ export const Targets = {
           agent.age >= 5 &&
           agent.size > other.size &&
           agent != other &&
-          agent.matingDrive === 100 &&
+          //agent.behaviors.matingDrive.cooldown === 0 &&
+          other.type === "citizen" &&
+          other.gender === "male" &&
+          other.age >= 5 &&
+          other.isAlive 
+      );
+    },
+    male: (world, agent) => {
+      findAndSetTarget(
+        agent,
+        world.agents,
+        (other) =>
+          agent.type === "citizen" &&
+          agent.gender === "female" &&
+          agent.age >= 5 &&
+          agent.behaviors.matingDrive.cooldown === 0 &&
+          other.size > agent.size &&
           other.type === "citizen" &&
           other.gender === "male" &&
           other.age >= 5 &&
@@ -47,14 +63,14 @@ export const Targets = {
         agent,
         world.agents,
         (other) =>
-          agent.matingDrive === 100 &&
+          agent.behaviors.matingDrive.cooldown === 0 &&
           agent.gender === "male" &&
           other.gender === "female" &&
           other.age >= 3 &&
           other.type === "citizen" &&
           other.isAlive &&
           other.attractiveness === world.maxAttractiveness &&
-          other.reproductionCooldown === 0
+          other.behaviors.reproduction.cooldown === 0
       );
     },
   },

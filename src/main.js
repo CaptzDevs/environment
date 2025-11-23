@@ -13,6 +13,7 @@ import { randInt } from "./helper/math";
 import { size, words } from "lodash";
 import { Behavior } from "./behavior/behavior";
 import { WORLD_CONFIG } from "./config/config";
+import { distant } from "./helper/distant";
 
 export function logJson(obj, indent = 2) {
   return JSON.stringify(obj, null, indent);
@@ -32,7 +33,7 @@ const VISUAL_SETTING = {
   trailLength: 100,
   trailAlpha: 0.1,
   trailColor: [255, 255, 255],
-  facingSensor: true,
+  facingSensor: false,
   facingSensorColor: [255, 0, 0],
 };
 // ================= World Blueprint =================
@@ -59,14 +60,29 @@ const Agent = {
   hunger: 50,
   gender: "male",
   visibility: 100, // pixels → ระยะมองเห็น
+  behaviors: {
+    reproduction: {
+      cooldown: 100,
+      cooldownStep: 0,
+      chance: 0.8,
+      increment: 0,
+      decreasement: 0,
+    },
+    matingDrive: {
+      cooldown: 100,
+      cooldownStep: 0.5,
+      chance: 0.5,
+      increment: 0,
+      decreasement: 5,
+    },
+  },
   color: [Math.random() * 255, Math.random() * 255, Math.random() * 255], // RGB random
   step(world) {
-    console.log("dasodsakod");
     this.x += Math.random() * 4 - 2;
     this.y += Math.random() * 4 - 2;
   },
   info() {
-    return `${this.type} ${this.agentName} | Gender: ${this.gender} | att: ${this.reproductionCooldown}`;
+    return `${this.type} ${this.agentName} | Gender: ${this.gender} | att: ${this.behaviors.reproduction.cooldown}`;
   },
 };
 
@@ -110,7 +126,6 @@ const WorldRules = {
           agentName: "C" + Math.floor(Math.random() * 1000),
         });
         agents.push(newCitizen);
-        console.log("New Citizen born:", newCitizen.agentName);
       }
 
       // เกิด business ใหม่
@@ -119,7 +134,6 @@ const WorldRules = {
           agentName: "B" + Math.floor(Math.random() * 1000),
         });
         agents.push(newBusiness);
-        console.log("New Business opened:", newBusiness.agentName);
       }
     },
   },
@@ -132,13 +146,11 @@ const WorldRules = {
       // โบนัส citizen
       if (Math.random() < 0.01) {
         citizens.forEach((c) => (c.money += 10));
-        console.log("World Event: Citizens got a bonus!");
       }
 
       // Crisis
       if (Math.random() < 0.005) {
         citizens.forEach((c) => (c.money = Math.max(0, c.money - 10)));
-        console.log("World Event: Citizens lost money due to crisis!");
       }
     },
   },
@@ -251,7 +263,6 @@ const World = {
     this.tick++;
     this.step();
     if (this.tick % this.worldTicksPerDay === 0) {
-      console.log(`Day ${this.tick / this.worldTicksPerDay} passed`);
     }
   },
 };
@@ -273,6 +284,23 @@ function randomWarmNeon() {
 // Biology
 // Economy
 
+function updateCooldowns(agent) {
+  for (const key in agent.behaviors) {
+    const behavior = agent.behaviors[key];
+
+    // ตรวจสอบว่ามี cooldown และ cooldownStep
+    if (
+      behavior.cooldown !== undefined &&
+      behavior.cooldownStep !== undefined
+    ) {
+      behavior.cooldown -= behavior.cooldownStep;
+
+      // ไม่ให้ cooldown ติดลบ
+      if (behavior.cooldown < 0) behavior.cooldown = 0;
+    }
+  }
+}
+
 // ================= Factory Functions =================
 export function createCitizen(props) {
   const gender = GENDERS[Math.floor(Math.random() * GENDERS.length)];
@@ -285,10 +313,7 @@ export function createCitizen(props) {
     energy: 100,
     speed: 2,
     gender,
-    reproductionCooldown: 100,
-    reproductionChance: 0.5,
-    matingDrive: 0, // ความอยากที่จะผสมพันธุ์
-    visibility: 100,
+    visibility: 2500,
     color: gender === "male" ? randomCoolNeon() : randomWarmNeon(),
     isAlive: true,
     attractiveness: gender === "female" ? randInt(0, 100, true) : 0,
@@ -299,6 +324,36 @@ export function createCitizen(props) {
     eaten: 0,
     money: 100,
 
+    behaviors: {
+      reproduction: {
+        cooldown: 100,
+        cooldownStep: .05,
+        chance: 0.5,
+        increment: 0,
+        decreasement: 0,
+      },
+      matingDrive: {
+        cooldown: 100,
+        cooldownStep: 0.1,
+        chance: 1,
+        increment: 0,
+        decreasement: 5,
+      },
+      giveFoodToBaby: {
+        cooldown: 100,
+        cooldownStep: 5,
+        chance: 1,
+        increment: 0,
+        decreasement: 5,
+      },
+      giveFoodToFemale: {
+        cooldown: 100,
+        cooldownStep: 0.5,
+        chance: 1,
+        increment: 0,
+        decreasement: 5,
+      },
+    },
     // Movement
     trail: [],
     trailLength: 100,
@@ -312,12 +367,14 @@ export function createCitizen(props) {
     facing: Math.random() * Math.PI * 2,
     rotationSpeed: 1 / 10,
     avoidType: "repel",
+
+    getHit: false,
     ...props,
 
     step(world) {
       // ---------- Passive ----------
-      this.matingDrive += 0.5;
-      this.matingDrive = Math.min(100, this.matingDrive);
+      updateCooldowns(this);
+
       this.avoidRadius = this.size;
 
       if (!this.isAlive) {
@@ -333,7 +390,7 @@ export function createCitizen(props) {
         }
         this.eaten = 0;
         world.agentsDead.push(this);
-        world.removeAgentsBy((a) => a === this);
+        //world.removeAgentsBy((a) => a === this);
         return;
       }
 
@@ -343,14 +400,14 @@ export function createCitizen(props) {
         return;
       }
 
-      /*   if(this.attractiveness === world.maxAttractiveness && this.gender === 'female'){
-        this.size = 100
-        this.hunger = 100
-      } */
+      if ((world.tick % world.worldTicksPerDay) / 10 === 0) {
+        this.getHit = false;
+      }
+
       // hunger decay
       Behavior.passive.agent.hungerDecay(world, this);
       // ReproductionCooldown
-      Behavior.passive.agent.reproductionCooldown(world, this);
+      //Behavior.passive.agent.reproductionCooldown(world, this);
       // Age up
       Behavior.passive.agent.ageUp(world, this);
 
@@ -369,18 +426,20 @@ export function createCitizen(props) {
       Behavior.target.agent.baby(world, this);
 
       // closestFemale with most attractiveness
-      Behavior.target.agent.femaleWithMostAttractiveness(world, this);
+      //Behavior.target.agent.femaleWithMostAttractiveness(world, this);
       // closestMale to fight
       Behavior.target.agent.goFight(world, this);
       // closestBusiness
       Behavior.target.resource.food(world, this);
+      // closestMale
+      Behavior.target.agent.male(world, this);
 
       const threat = findClosestTarget(this, world.agents, (other) => {
         // เงื่อนไขให้ถือเป็น threat
         return (
           this.gender === "male" &&
           other.gender === "male" &&
-          other.matingDrive === 100 &&
+          other.behaviors.matingDrive.cooldown === 0 &&
           other.age >= 5 &&
           other.type === "citizen" &&
           other.isAlive &&
@@ -388,20 +447,17 @@ export function createCitizen(props) {
         );
       });
 
-      const SAFE_DISTANCE = 80;
+      const SAFE_DISTANCE = 100;
       if (threat) {
-        const dx = threat.x - this.x;
-        const dy = threat.y - this.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const { dist } = distant(this, threat);
 
-        if (dist <= SAFE_DISTANCE) {
+        if (dist <= SAFE_DISTANCE - threat.size) {
+          
           fleeAgent(this, threat); // หนีจาก threat
-        } else {
-          moveToTarget(this, this.targetX, this.targetY, this.speed);
         }
-      } else {
-        moveToTarget(this, this.targetX, this.targetY, this.speed);
       }
+
+      moveToTarget(this, this.targetX, this.targetY, this.speed);
       // ---------- Wander (No target) ----------
 
       // ---------- หมุนหน้าไปยัง target ----------
@@ -419,25 +475,26 @@ export function createCitizen(props) {
       for (const ag of world.agents) {
         if (ag === this) continue;
 
-        const dx = ag.x - this.x;
-        const dy = ag.y - this.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const { dist } = distant(this, ag);
 
         // Eat
         Behavior.action.resource.eat(world, this, ag, dist);
         // Female Giving food to baby
         Behavior.action.resource.giveFoodToBaby(world, this, ag, dist);
         // Male Giving food to Most Attractive
-        Behavior.action.resource.giveFoodToFemaleWithMostAttractive(
+       /*  Behavior.action.resource.giveFoodToFemaleWithMostAttractive(
           world,
           this,
           ag,
           dist
-        );
+        ); */
         //ฺ Breed and produce children
         Behavior.action.resource.breeding(world, this, ag, dist);
 
         Behavior.action.resource.attack(world, this, ag, dist);
+
+        Behavior.action.resource.giveFoodToFemale(world, this, ag, dist);
+
       }
 
       /* this.avoidStrength = this.size * 0.5 */
@@ -489,8 +546,8 @@ export function createBusiness(props = {}) {
         fleeAgent(this, threat);
       } else {
         setRandomTarget(this);
-        moveToTarget(this, this.targetX, this.targetY, this.speed);
       }
+      moveToTarget(this, this.targetX, this.targetY, this.speed);
       // ---------- หมุนหน้าไปยัง target ----------
       // รีเซ็ต counter และเก็บรายชื่อ citizen รอบตัว
       this.currentAgents = 0;
@@ -506,7 +563,6 @@ export function createBusiness(props = {}) {
         if (dist <= agent.size && agent.type === "citizen" && agent.isAlive) {
           this.currentAgents += 1;
           agentsNearby.push(agent);
-          //console.log(agent.agentName, "near", this.agentName);
           /*   agent.hunger += 10; */
           this.money += this.price;
           /*      const index = world.agents.indexOf(this);
@@ -520,11 +576,6 @@ export function createBusiness(props = {}) {
         const index = world.agents.indexOf(this);
         if (index !== -1) {
           /*  world.agents.splice(index, 1); */
-          console.log(
-            `${
-              this.agentName
-            } destroyed due to overcrowding by: ${agentsNearby.join(", ")}`
-          );
         }
       }
     },
@@ -551,8 +602,54 @@ function maintainBusinesses(world, minCount = 3) {
       agentName: "B" + Math.floor(Math.random() * 1000),
     });
     world.addAgent(newB);
-    console.log("New business spawned:", newB.agentName);
   }
+}
+
+const drawRules = [
+  {
+    name: "specialFemale",
+    condition: (a, World) =>
+      a.attractiveness === World.maxAttractiveness && a.gender === "female",
+    style: (p, a) => {
+      p.fill(255, 141, 161);
+      p.stroke(255, 125, 125);
+      p.strokeWeight(5);
+    },
+  },
+  {
+    name: "hit",
+    condition: (a) => a.isAlive && a.getHit && a.gender === "male",
+    style: (p, a) => {
+      p.fill(255, 0, 0, 200);
+      p.stroke(178, 34, 34, 200);
+    },
+  },
+  {
+    name: "normal",
+    condition: (a) => a.isAlive && !a.getHit,
+    style: (p, a) => {
+      const [r, g, b] = a.color || [100, 100, 255];
+      p.fill(r, g, b);
+      p.noStroke();
+    },
+  },
+];
+
+function drawAgent(p, a, World, drawRules) {
+  // หา rule แรกที่ condition ผ่าน
+  const matchedRule = drawRules.find((rule) => rule.condition(a, World));
+
+  // ถ้าเจอ rule → ใช้ style ของ rule นั้น
+  if (matchedRule) {
+    matchedRule.style(p, a, World);
+  } else {
+    // fallback กรณีไม่เข้า rule ใดเลย
+    p.fill(255, 0, 0);
+    p.noStroke();
+  }
+
+  // วาดรูป (circle หรือ image)
+  p.circle(a.x, a.y, a.size);
 }
 
 let img;
@@ -630,7 +727,6 @@ const sketch = (p) => {
     // วาด agent
     for (const a of World.agents) {
       // ใช้สีของ agent หรือ default ถ้าไม่มี
-      const [r, g, b] = a.color || [100, 100, 255];
 
       if (a.type === "citizen" && a.isAlive) {
         // ---------- วาด trail ----------
@@ -655,39 +751,24 @@ const sketch = (p) => {
 
         // ---------- วาดตัว citizen ----------
 
+        drawAgent(p, a, World, drawRules);
+
         // ถ้าเป็นตัวดึงดูดที่สุด + female + มีรูป → ไม่วาดวงกลมสีเลย
-        const isSpecial =
-          a.attractiveness === World.maxAttractiveness &&
-          a.gender === "female" &&
-          img &&
-          img2;
-
-        if (!isSpecial) {
-          // วาดวงกลมปกติ
-          if (a.isAlive) {
-            p.fill(r, g, b);
-          } else {
-            p.fill(114, 114, 114);
-          }
-
-          p.noStroke();
-          p.circle(a.x, a.y, a.size);
-        }
 
         // ------ วาดภาพแทนวงกลม ------
-        if (isSpecial) {
-          /*   p.noStroke();
+        /*    if (isSpecial) {
+             p.noStroke();
           p.noFill();
           if(a.reproductionCooldown > 0){
             p.image(img, a.x - a.size / 2, a.y - a.size / 2, a.size, a.size);
           }else{
             p.image(img2, a.x - a.size / 2, a.y - a.size / 2, a.size, a.size);
-          } */
+          } 
           p.fill(255, 141, 161);
           p.stroke(255, 125, 125);
           p.strokeWeight(5);
           p.circle(a.x, a.y, a.size);
-        }
+        } */
 
         // วาดวงกลมตัว citizen
 
@@ -695,17 +776,21 @@ const sketch = (p) => {
         if (VISUAL_SETTING.facingSensor) {
           p.stroke(255, 255, 255, 200);
           p.strokeWeight(2);
-        }
 
-        // Normal facing indicator
-        /* const fx = a.x + Math.cos(a.facing) * (Math.max(a.size, 5) + 10);
+          // Normal facing indicator
+          /* const fx = a.x + Math.cos(a.facing) * (Math.max(a.size, 5) + 10);
         const fy = a.y + Math.sin(a.facing) * (Math.max(a.size, 5) + 10); */
 
-        //  facing indicator to target
-        const fx = a.targetX + Math.cos(a.facing) * Math.max(a.size, 5);
-        const fy = a.targetY + Math.sin(a.facing) * Math.max(a.size, 5);
+          //  facing indicator to target
+          const fx = a.targetX + Math.cos(a.facing) * Math.max(a.size, 5);
+          const fy = a.targetY + Math.sin(a.facing) * Math.max(a.size, 5);
 
-        p.line(a.x, a.y, fx, fy);
+          p.line(a.x, a.y, fx, fy);
+        }
+
+        p.fill(0, 0, 0);
+        p.textSize(14);
+        p.text(`${a.age} ${a.hunger} ${a.behaviors.matingDrive.cooldown.toFixed(2)}`, a.x + a.size / 2, a.y + a.size / 2);
       } else if (a.type === "business") {
         // วาด business
         p.fill(200, 100, 50);
@@ -731,7 +816,6 @@ const sketch = (p) => {
 
       World.addAgent(newBusiness);
 
-      console.log("New Business created:", agentName, "at", p.mouseX, p.mouseY);
     }; */
 
     // แสดง tooltip
@@ -958,8 +1042,6 @@ function updateStats() {
   }
 
   if (Logs.logs.length > 0 && (World.tick % World.worldTicksPerDay) / 2 === 0) {
-    console.log(Logs.logs, "ddasdd");
-
     // Extract labels (days) และ dataset values
     const data = Logs.logs || [];
     renderPopulationChart(data); // initial

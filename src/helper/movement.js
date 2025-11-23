@@ -1,4 +1,5 @@
 import { WORLD_CONFIG } from "../config/config";
+import { distant } from "./distant";
 import { randInt } from "./math";
 
 const { WORLD_WIDTH , WORLD_HEIGHT } = WORLD_CONFIG
@@ -269,50 +270,64 @@ export const randomDropArea = (x,y) => {
 
 
 export function fleeAgent(agent, threat) {
-  // คำนวณ vector หนี
-  let dx = agent.x - threat.x;
-  let dy = agent.y - threat.y;
-  let dist = Math.sqrt(dx * dx + dy * dy);
-
+  const FLEE_DISTANCE = 50;
   const fleeSpeed = agent.speed ?? 2;
 
-  // ป้องกัน div/0
+  
+  agent.targetX = null
+  agent.targetY = null
+  
+  let dx = agent.x - threat.x;
+  let dy = agent.y - threat.y;
+  let dist = Math.hypot(dx, dy);
+
   if (dist === 0) {
     dx = Math.random() - 0.5;
     dy = Math.random() - 0.5;
-    dist = Math.sqrt(dx * dx + dy * dy);
+    dist = Math.hypot(dx, dy);
   }
 
-  agent.x += (dx / dist) * fleeSpeed;
-  agent.y += (dy / dist) * fleeSpeed;
+  // มุมหนี
+  let fleeAngle = Math.atan2(dy, dx);
 
-  // ------- Clamp ให้อยู่ใน WORLD -------
-  let atEdge = false;
-  if (agent.x < 0) {
-    agent.x = 0;
-    atEdge = true;
-  }
-  if (agent.y < 0) {
-    agent.y = 0;
-    atEdge = true;
-  }
-  if (agent.x > WORLD_WIDTH) {
-    agent.x = WORLD_WIDTH;
-    atEdge = true;
-  }
-  if (agent.y > WORLD_HEIGHT) {
-    agent.y = WORLD_HEIGHT;
-    atEdge = true;
+  // กำหนด target หนี
+  let targetX = agent.x + Math.cos(fleeAngle) * FLEE_DISTANCE;
+  let targetY = agent.y + Math.sin(fleeAngle) * FLEE_DISTANCE;
+
+  // check ใกล้ขอบ
+  const EDGE_MARGIN = 0;
+  const nearEdge =
+    targetX < EDGE_MARGIN ||
+    targetY < EDGE_MARGIN ||
+    targetX > WORLD_WIDTH - EDGE_MARGIN ||
+    targetY > WORLD_HEIGHT - EDGE_MARGIN;
+
+  // random escape
+  if (nearEdge) {
+    fleeAngle = Math.random() * Math.PI * 2;
+    targetX = agent.x + Math.cos(fleeAngle) * FLEE_DISTANCE;
+    targetY = agent.y + Math.sin(fleeAngle) * FLEE_DISTANCE;
   }
 
-  // ------- หากติดขอบ ให้หนีไปทางอื่น -------
-  if (atEdge) {
-    const angle = Math.random() * 2 * Math.PI;
-    agent.x += Math.cos(angle) * fleeSpeed * 2;
-    agent.y += Math.sin(angle) * fleeSpeed * 2;
+  // clamp
+  targetX = Math.max(0, Math.min(targetX, WORLD_WIDTH));
+  targetY = Math.max(0, Math.min(targetY, WORLD_HEIGHT));
 
-    // Clamp อีกครั้งเพื่อความปลอดภัย
-    agent.x = Math.max(0, Math.min(agent.x, WORLD_WIDTH));
-    agent.y = Math.max(0, Math.min(agent.y, WORLD_HEIGHT));
+  // อัปเดต target ไว้เผื่อระบบคุณใช้
+  agent.targetX = targetX;
+  agent.targetY = targetY;
+
+  // ✔ ใช้ fleeSpeed ขยับ agent เข้าหา target
+  const stepDX = targetX - agent.x;
+  const stepDY = targetY - agent.y;
+  const stepDist = Math.hypot(stepDX, stepDY);
+
+  if (stepDist > 0) {
+    const ratio = fleeSpeed / stepDist;
+    agent.x += stepDX * ratio;
+    agent.y += stepDY * ratio;
   }
+
+  // หันหน้าไปตามมุมหนี
+  agent.facing = fleeAngle;
 }
